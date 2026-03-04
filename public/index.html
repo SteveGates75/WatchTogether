@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audio Chat with Friend</title>
+    <title>Audio + 1080p Screen Share</title>
     <style>
         * {
             margin: 0;
@@ -64,33 +64,38 @@
         }
 
         .sidebar {
-            width: 80px;
+            width: 100px;
             background: #2c2c2c;
             padding: 1rem;
             display: flex;
             flex-direction: column;
             align-items: center;
+            gap: 1rem;
         }
 
-        .call-button {
-            width: 50px;
-            height: 50px;
+        .sidebar button {
+            width: 60px;
+            height: 60px;
             border-radius: 50%;
             background: #3c3c3c;
             border: none;
             color: white;
             font-size: 24px;
             cursor: pointer;
-            margin-bottom: 1rem;
+            transition: all 0.3s;
         }
 
-        .call-button.active {
+        .sidebar button.active {
             background: #ed4245;
         }
 
-        .call-button:disabled {
+        .sidebar button:disabled {
             opacity: 0.5;
             cursor: not-allowed;
+        }
+
+        .sidebar button.sharing {
+            background: #3ba55d;
         }
 
         .main-content {
@@ -166,21 +171,76 @@
             border-radius: 20px;
             font-size: 14px;
             display: none;
+            z-index: 1000;
         }
 
         #call-status.active {
             display: block;
+        }
+
+        #call-status.connecting {
+            background: #faa81a;
+        }
+
+        #call-status.connected {
+            background: #3ba55d;
+        }
+
+        #call-status.screen-sharing {
+            background: #5865f2;
+        }
+
+        #screen-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: black;
+            z-index: 2000;
+            display: none;
+        }
+
+        #screen-container.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        #remote-screen {
+            flex: 1;
+            width: 100%;
+            object-fit: contain;
+            background: black;
+        }
+
+        .screen-controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 8px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .screen-controls button {
+            padding: 8px 16px;
             background: #ed4245;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
         }
 
         @media (max-width: 768px) {
             .sidebar {
-                width: 60px;
+                width: 80px;
             }
             
-            .call-button {
-                width: 40px;
-                height: 40px;
+            .sidebar button {
+                width: 50px;
+                height: 50px;
                 font-size: 20px;
             }
         }
@@ -188,14 +248,15 @@
 </head>
 <body>
     <div id="login-container">
-        <h2>🎧 Audio Chat</h2>
+        <h2>🎬 Audio + 1080p Screen Share</h2>
         <input type="text" id="username-input" placeholder="Enter your name" autocomplete="off">
         <button onclick="login()">Join Chat</button>
     </div>
 
     <div id="app-container" style="display: none;">
         <div class="sidebar">
-            <button class="call-button" id="callBtn" onclick="toggleCall()" title="Start Audio Call">🎧</button>
+            <button id="callBtn" onclick="toggleCall()" title="Start Audio Call">🎧</button>
+            <button id="screenBtn" onclick="toggleScreenShare()" title="Share Screen in 1080p">📺</button>
         </div>
         
         <div class="main-content">
@@ -209,7 +270,14 @@
         </div>
     </div>
 
-    <div id="call-status">🔴 Call in progress</div>
+    <div id="call-status"></div>
+
+    <div id="screen-container">
+        <video id="remote-screen" autoplay playsinline></video>
+        <div class="screen-controls">
+            <button onclick="closeScreenView()">Close</button>
+        </div>
+    </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="script.js"></script>

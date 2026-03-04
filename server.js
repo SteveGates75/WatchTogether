@@ -18,7 +18,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Store connected users
 const users = {};
-let audioRoomUsers = [];
+let roomUsers = [];
 
 io.on('connection', (socket) => {
   console.log('New user connected:', socket.id);
@@ -48,31 +48,31 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Audio call rooms
-  socket.on('join-audio-room', (roomId) => {
+  // Room management for calls/shares
+  socket.on('join-room', (roomId) => {
     socket.join(roomId);
-    audioRoomUsers.push(socket.id);
+    roomUsers.push(socket.id);
     
     // Notify others in the room
-    socket.to(roomId).emit('user-joined-audio', socket.id);
+    socket.to(roomId).emit('user-joined-room', socket.id);
   });
 
-  socket.on('leave-audio-room', (roomId) => {
+  socket.on('leave-room', (roomId) => {
     socket.leave(roomId);
-    audioRoomUsers = audioRoomUsers.filter(id => id !== socket.id);
-    socket.to(roomId).emit('user-left-audio', socket.id);
+    roomUsers = roomUsers.filter(id => id !== socket.id);
+    socket.to(roomId).emit('user-left-room', socket.id);
   });
 
-  // Audio signaling
-  socket.on('audio-offer', (data) => {
-    socket.to(data.target).emit('audio-offer', {
+  // WebRTC signaling
+  socket.on('offer', (data) => {
+    socket.to(data.target).emit('offer', {
       offer: data.offer,
       sender: socket.id
     });
   });
 
-  socket.on('audio-answer', (data) => {
-    socket.to(data.target).emit('audio-answer', {
+  socket.on('answer', (data) => {
+    socket.to(data.target).emit('answer', {
       answer: data.answer,
       sender: socket.id
     });
@@ -97,10 +97,10 @@ io.on('connection', (socket) => {
       delete users[socket.id];
     }
     
-    // Remove from audio room
-    if (audioRoomUsers.includes(socket.id)) {
-      audioRoomUsers = audioRoomUsers.filter(id => id !== socket.id);
-      io.to('audio-room-1').emit('user-left-audio', socket.id);
+    // Remove from room and notify others
+    if (roomUsers.includes(socket.id)) {
+      roomUsers = roomUsers.filter(id => id !== socket.id);
+      io.to('main-room').emit('user-left-room', socket.id);
     }
     
     console.log('User disconnected:', socket.id);
