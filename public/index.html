@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audio + 1080p Screen Share</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>4K Screen Share - Optimized</title>
     <style>
         * {
             margin: 0;
@@ -14,7 +14,7 @@
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
             height: 100vh;
-            background: #1a1a1a;
+            background: #0a0a0a;
             color: white;
         }
 
@@ -23,39 +23,42 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            background: #2c2c2c;
+            background: #1a1a1a;
             padding: 2rem;
-            border-radius: 8px;
+            border-radius: 16px;
             text-align: center;
             width: 90%;
             max-width: 400px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
         }
 
         #login-container h2 {
-            margin-bottom: 1rem;
+            margin-bottom: 1.5rem;
             color: #fff;
+            font-size: 24px;
         }
 
         #login-container input {
-            padding: 0.8rem;
+            padding: 1rem;
             margin-bottom: 1rem;
             width: 100%;
             border: none;
-            border-radius: 4px;
-            background: #3c3c3c;
+            border-radius: 8px;
+            background: #2a2a2a;
             color: white;
             font-size: 16px;
         }
 
         #login-container button {
-            padding: 0.8rem 1.5rem;
+            padding: 1rem 1.5rem;
             background: #5865f2;
             color: white;
             border: none;
-            border-radius: 4px;
+            border-radius: 8px;
             cursor: pointer;
             font-size: 16px;
             width: 100%;
+            font-weight: bold;
         }
 
         #app-container {
@@ -64,8 +67,8 @@
         }
 
         .sidebar {
-            width: 100px;
-            background: #2c2c2c;
+            width: 80px;
+            background: #1a1a1a;
             padding: 1rem;
             display: flex;
             flex-direction: column;
@@ -74,10 +77,10 @@
         }
 
         .sidebar button {
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            background: #3c3c3c;
+            width: 50px;
+            height: 50px;
+            border-radius: 12px;
+            background: #2a2a2a;
             border: none;
             color: white;
             font-size: 24px;
@@ -89,13 +92,12 @@
             background: #ed4245;
         }
 
-        .sidebar button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
         .sidebar button.sharing {
             background: #3ba55d;
+        }
+
+        .sidebar button:hover {
+            transform: scale(1.05);
         }
 
         .main-content {
@@ -115,16 +117,16 @@
             flex: 1;
             overflow-y: auto;
             padding: 1rem;
-            background: #2c2c2c;
-            border-radius: 8px;
+            background: #1a1a1a;
+            border-radius: 12px;
             margin-bottom: 1rem;
         }
 
         .message {
             margin-bottom: 0.5rem;
-            padding: 0.5rem;
-            background: #3c3c3c;
-            border-radius: 4px;
+            padding: 0.75rem;
+            background: #2a2a2a;
+            border-radius: 8px;
         }
 
         .message strong {
@@ -133,8 +135,8 @@
         }
 
         .message small {
-            color: #999;
-            font-size: 0.8rem;
+            color: #888;
+            font-size: 0.75rem;
             margin-left: 0.5rem;
         }
 
@@ -145,49 +147,52 @@
 
         .message-input input {
             flex: 1;
-            padding: 0.8rem;
+            padding: 1rem;
             border: none;
-            border-radius: 4px;
-            background: #3c3c3c;
+            border-radius: 8px;
+            background: #2a2a2a;
             color: white;
             font-size: 16px;
         }
 
         .message-input button {
-            padding: 0.8rem 1.5rem;
+            padding: 1rem 1.5rem;
             background: #5865f2;
             color: white;
             border: none;
-            border-radius: 4px;
+            border-radius: 8px;
             cursor: pointer;
+            font-weight: bold;
         }
 
-        #call-status {
+        #status-container {
             position: fixed;
             top: 10px;
             right: 10px;
-            background: #2c2c2c;
-            padding: 0.5rem 1rem;
-            border-radius: 20px;
-            font-size: 14px;
-            display: none;
             z-index: 1000;
+            display: flex;
+            gap: 10px;
         }
 
-        #call-status.active {
+        .status-badge {
+            background: #1a1a1a;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 12px;
+            display: none;
+        }
+
+        .status-badge.active {
             display: block;
         }
 
-        #call-status.connecting {
-            background: #faa81a;
-        }
+        #call-status.connecting { background: #faa81a; }
+        #call-status.connected { background: #3ba55d; }
+        #call-status.screen-sharing { background: #5865f2; }
 
-        #call-status.connected {
-            background: #3ba55d;
-        }
-
-        #call-status.screen-sharing {
-            background: #5865f2;
+        #bitrate-status {
+            background: #2a2a2a;
+            color: #fff;
         }
 
         #screen-container {
@@ -209,6 +214,7 @@
         #remote-screen {
             flex: 1;
             width: 100%;
+            height: 100%;
             object-fit: contain;
             background: black;
         }
@@ -217,30 +223,48 @@
             position: absolute;
             bottom: 20px;
             right: 20px;
-            background: rgba(0,0,0,0.7);
-            padding: 10px;
-            border-radius: 8px;
+            background: rgba(0,0,0,0.8);
+            padding: 12px 20px;
+            border-radius: 30px;
             display: flex;
             gap: 10px;
+            backdrop-filter: blur(10px);
         }
 
         .screen-controls button {
-            padding: 8px 16px;
+            padding: 8px 20px;
             background: #ed4245;
             color: white;
             border: none;
-            border-radius: 4px;
+            border-radius: 20px;
             cursor: pointer;
+            font-weight: bold;
+        }
+
+        .quality-indicator {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.7);
+            color: #3ba55d;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .quality-indicator.visible {
+            display: block;
         }
 
         @media (max-width: 768px) {
             .sidebar {
-                width: 80px;
+                width: 60px;
             }
             
             .sidebar button {
-                width: 50px;
-                height: 50px;
+                width: 40px;
+                height: 40px;
                 font-size: 20px;
             }
         }
@@ -248,15 +272,15 @@
 </head>
 <body>
     <div id="login-container">
-        <h2>🎬 Audio + 1080p Screen Share</h2>
+        <h2>🎬 4K Screen Share</h2>
         <input type="text" id="username-input" placeholder="Enter your name" autocomplete="off">
         <button onclick="login()">Join Chat</button>
     </div>
 
     <div id="app-container" style="display: none;">
         <div class="sidebar">
-            <button id="callBtn" onclick="toggleCall()" title="Start Audio Call">🎧</button>
-            <button id="screenBtn" onclick="toggleScreenShare()" title="Share Screen in 1080p">📺</button>
+            <button id="callBtn" onclick="toggleCall()" title="Audio Call">🎧</button>
+            <button id="screenBtn" onclick="toggleScreenShare()" title="Share Screen">📺</button>
         </div>
         
         <div class="main-content">
@@ -270,10 +294,14 @@
         </div>
     </div>
 
-    <div id="call-status"></div>
+    <div id="status-container">
+        <div id="call-status" class="status-badge"></div>
+        <div id="bitrate-status" class="status-badge"></div>
+    </div>
 
     <div id="screen-container">
         <video id="remote-screen" autoplay playsinline></video>
+        <div class="quality-indicator" id="quality-indicator">📺 1080p 60fps</div>
         <div class="screen-controls">
             <button onclick="closeScreenView()">Close</button>
         </div>

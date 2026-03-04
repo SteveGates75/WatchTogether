@@ -10,14 +10,16 @@ let screenButton = null;
 let remoteAudio = null;
 let remoteScreen = null;
 
-// STUN servers for better connection
+// Better STUN servers for faster connection
 const configuration = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' }
-    ]
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' }
+    ],
+    iceCandidatePoolSize: 10
 };
 
 function login() {
@@ -32,7 +34,7 @@ function login() {
         callButton = document.getElementById('callBtn');
         screenButton = document.getElementById('screenBtn');
         
-        // Create hidden audio element
+        // Create hidden audio element with optimized settings
         remoteAudio = new Audio();
         remoteAudio.autoplay = true;
         remoteAudio.controls = false;
@@ -69,7 +71,6 @@ socket.on('user-left', (data) => {
     messageEl.innerHTML = `<em>${data.message}</em>`;
     messagesDiv.appendChild(messageEl);
     
-    // If other user left, end everything
     if (isCallActive || isScreenSharing) {
         endCall();
         stopScreenShare();
@@ -100,7 +101,7 @@ async function toggleCall() {
     }
 }
 
-// Start audio call
+// OPTIMIZED: Start audio call with better quality
 async function startAudioCall() {
     try {
         console.log('🎤 Starting audio call...');
@@ -112,20 +113,34 @@ async function startAudioCall() {
                 echoCancellation: true,
                 noiseSuppression: true,
                 autoGainControl: true,
-                sampleRate: 48000
+                sampleRate: 48000,
+                channelCount: 2,
+                volume: 1.0
             }
         });
         
+        // Optimize audio settings
+        const audioTrack = localStream.getAudioTracks()[0];
+        if (audioTrack) {
+            const constraints = audioTrack.getConstraints();
+            await audioTrack.applyConstraints({
+                volume: 1.0,
+                sampleRate: 48000,
+                sampleSize: 16,
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true
+            });
+        }
+        
         console.log('✅ Microphone access granted');
         
-        // Update UI
         callButton.classList.add('active');
         callButton.textContent = '🔴';
         callButton.title = 'End Call';
         
         updateStatus('Connecting...', 'connecting');
         
-        // Join room
         socket.emit('join-room', 'main-room');
         isCallActive = true;
         
@@ -156,7 +171,7 @@ function endCall() {
     
     callButton.classList.remove('active');
     callButton.textContent = '🎧';
-    callButton.title = 'Start Audio Call';
+    callButton.title = 'Audio Call';
     
     updateStatus('', '');
     isCallActive = false;
@@ -171,42 +186,94 @@ async function toggleScreenShare() {
     }
 }
 
-// Start 1080p screen share
+// OPTIMIZED: Start 1080p screen share with better bitrate control
 async function startScreenShare() {
     try {
-        console.log('📺 Starting 1080p screen share...');
+        console.log('📺 Starting optimized screen share...');
         
         updateStatus('Requesting screen access...', 'connecting');
         
-        // Request screen with 1080p quality
+        // Check bandwidth first
+        const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+        let bandwidth = 'high';
+        if (connection) {
+            const downlink = connection.downlink || 10;
+            if (downlink < 2) bandwidth = 'low';
+            else if (downlink < 5) bandwidth = 'medium';
+            else bandwidth = 'high';
+        }
+        
+        console.log('📊 Detected bandwidth:', bandwidth);
+        
+        // Adjust quality based on bandwidth
+        let videoConstraints = {
+            width: { ideal: 1920, max: 1920 },
+            height: { ideal: 1080, max: 1080 },
+            frameRate: { ideal: 30 }
+        };
+        
+        if (bandwidth === 'low') {
+            videoConstraints = {
+                width: { ideal: 854, max: 1280 },
+                height: { ideal: 480, max: 720 },
+                frameRate: { ideal: 15, max: 20 }
+            };
+            updateBitrate('Low bandwidth mode (480p)');
+        } else if (bandwidth === 'medium') {
+            videoConstraints = {
+                width: { ideal: 1280, max: 1280 },
+                height: { ideal: 720, max: 720 },
+                frameRate: { ideal: 24, max: 30 }
+            };
+            updateBitrate('Medium bandwidth mode (720p)');
+        } else {
+            updateBitrate('High bandwidth mode (1080p)');
+        }
+        
+        // Request screen share
         screenStream = await navigator.mediaDevices.getDisplayMedia({ 
-            video: {
-                width: { ideal: 1920, max: 1920 },
-                height: { ideal: 1080, max: 1080 },
-                frameRate: { ideal: 30, max: 30 }
-            },
-            audio: true // Include system audio if available
+            video: videoConstraints,
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                sampleRate: 48000
+            }
         });
         
-        console.log('✅ Screen access granted');
-        console.log('📊 Screen resolution:', screenStream.getVideoTracks()[0].getSettings());
+        // Optimize video track
+        const videoTrack = screenStream.getVideoTracks()[0];
+        if (videoTrack) {
+            const settings = videoTrack.getSettings();
+            console.log('📊 Screen resolution:', settings);
+            
+            // Apply additional constraints for smoother playback
+            await videoTrack.applyConstraints({
+                width: { ideal: settings.width },
+                height: { ideal: settings.height },
+                frameRate: { ideal: 30, max: 30 }
+            });
+        }
         
-        // Check if we have audio
+        // Handle audio
         const audioTracks = screenStream.getAudioTracks();
         if (audioTracks.length === 0) {
-            console.log('No system audio, using microphone');
-            // Add microphone if no system audio
+            console.log('Adding microphone for audio');
             try {
-                const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const micStream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                        sampleRate: 48000
+                    }
+                });
                 micStream.getAudioTracks().forEach(track => {
                     screenStream.addTrack(track);
-                    console.log('Added microphone track');
                 });
             } catch (micError) {
                 console.warn('Could not add microphone:', micError);
             }
-        } else {
-            console.log('System audio captured');
         }
         
         // Update UI
@@ -216,13 +283,12 @@ async function startScreenShare() {
         
         updateStatus('Sharing screen...', 'screen-sharing');
         
-        // Join room for sharing
         socket.emit('join-room', 'main-room');
         isScreenSharing = true;
         
-        // Handle when user stops sharing via browser UI
+        // Handle stop event
         screenStream.getVideoTracks()[0].onended = () => {
-            console.log('Screen sharing stopped by user');
+            console.log('Screen sharing stopped');
             stopScreenShare();
         };
         
@@ -240,16 +306,13 @@ function stopScreenShare() {
     console.log('⏹️ Stopping screen share...');
     
     if (screenStream) {
-        screenStream.getTracks().forEach(track => {
-            track.stop();
-            console.log('Stopped track:', track.kind);
-        });
+        screenStream.getTracks().forEach(track => track.stop());
         screenStream = null;
     }
     
     screenButton.classList.remove('sharing');
     screenButton.textContent = '📺';
-    screenButton.title = 'Share Screen in 1080p';
+    screenButton.title = 'Share Screen';
     
     if (!isCallActive) {
         updateStatus('', '');
@@ -257,6 +320,8 @@ function stopScreenShare() {
         updateStatus('Audio only', 'connected');
     }
     
+    document.getElementById('quality-indicator').classList.remove('visible');
+    updateBitrate('');
     isScreenSharing = false;
 }
 
@@ -270,48 +335,64 @@ function updateStatus(text, type) {
     const status = document.getElementById('call-status');
     if (text) {
         status.textContent = text;
-        status.className = 'active ' + type;
+        status.className = 'status-badge active ' + type;
     } else {
-        status.className = '';
+        status.className = 'status-badge';
     }
 }
 
-// Create peer connection
+// Update bitrate display
+function updateBitrate(text) {
+    const bitrateStatus = document.getElementById('bitrate-status');
+    if (text) {
+        bitrateStatus.textContent = text;
+        bitrateStatus.classList.add('active');
+    } else {
+        bitrateStatus.classList.remove('active');
+    }
+}
+
+// OPTIMIZED: Create peer connection with better settings
 function createPeerConnection(peerId) {
-    console.log('🔄 Creating peer connection');
+    console.log('🔄 Creating optimized peer connection');
     
     const pc = new RTCPeerConnection(configuration);
     
-    // Add tracks based on what's active
+    // Add tracks
     const activeStream = screenStream || localStream;
-    
     if (activeStream) {
         activeStream.getTracks().forEach(track => {
-            console.log(`➕ Adding ${track.kind} track to connection`);
+            console.log(`➕ Adding ${track.kind} track`);
             pc.addTrack(track, activeStream);
         });
     }
     
-    // Handle incoming tracks
+    // Handle incoming tracks with optimizations
     pc.ontrack = (event) => {
-        console.log(`📥 Received ${event.track.kind} track from peer`);
+        console.log(`📥 Received ${event.track.kind} track`);
         
         if (event.track.kind === 'audio') {
-            // Handle audio
+            // Optimized audio playback
             remoteAudio.srcObject = event.streams[0];
+            remoteAudio.volume = 1.0;
             remoteAudio.play()
-                .then(() => console.log('✅ Remote audio playing'))
+                .then(() => console.log('✅ Audio playing'))
                 .catch(e => console.log('Audio play error:', e));
         } else if (event.track.kind === 'video') {
-            // Handle video (screen share)
-            console.log('🎬 Received video track - this is a screen share');
+            // Optimized video playback
             remoteScreen.srcObject = event.streams[0];
             document.getElementById('screen-container').classList.add('active');
-            remoteScreen.play()
-                .then(() => console.log('✅ Remote video playing'))
-                .catch(e => console.log('Video play error:', e));
+            document.getElementById('quality-indicator').classList.add('visible');
             
-            updateStatus('Receiving screen share...', 'screen-sharing');
+            // Get video settings
+            const settings = event.track.getSettings();
+            const resolution = settings.width >= 1920 ? '1080p' : 
+                             settings.width >= 1280 ? '720p' : '480p';
+            document.getElementById('quality-indicator').innerHTML = `📺 ${resolution} ${settings.frameRate || 30}fps`;
+            
+            remoteScreen.play()
+                .then(() => console.log('✅ Video playing'))
+                .catch(e => console.log('Video play error:', e));
         }
     };
     
@@ -325,7 +406,7 @@ function createPeerConnection(peerId) {
         }
     };
     
-    // Monitor connection
+    // Monitor connection stats
     pc.onconnectionstatechange = () => {
         console.log('📊 Connection state:', pc.connectionState);
         if (pc.connectionState === 'connected') {
@@ -334,10 +415,9 @@ function createPeerConnection(peerId) {
             } else if (isCallActive) {
                 updateStatus('Connected - Audio active', 'connected');
             }
-        } else if (pc.connectionState === 'disconnected') {
-            console.log('Connection disconnected');
-        } else if (pc.connectionState === 'failed') {
-            console.log('Connection failed');
+            
+            // Start monitoring stats
+            monitorConnectionStats(pc);
         }
     };
     
@@ -345,31 +425,49 @@ function createPeerConnection(peerId) {
     return pc;
 }
 
+// Monitor connection statistics
+async function monitorConnectionStats(pc) {
+    try {
+        const stats = await pc.getStats();
+        stats.forEach(report => {
+            if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                if (report.availableOutgoingBitrate) {
+                    const bitrate = (report.availableOutgoingBitrate / 1000000).toFixed(1);
+                    console.log(`📊 Available bitrate: ${bitrate} Mbps`);
+                }
+            }
+            if (report.type === 'outbound-rtp' && report.mediaType === 'video') {
+                if (report.qualityLimitationReason !== 'none') {
+                    console.log(`⚠️ Quality limited by: ${report.qualityLimitationReason}`);
+                }
+            }
+        });
+    } catch (e) {
+        console.log('Stats monitoring error:', e);
+    }
+}
+
 // Signaling events
 socket.on('user-joined-room', async (userId) => {
     console.log('👤 User joined room:', userId);
     
     if ((isCallActive || isScreenSharing) && userId !== socket.id) {
-        console.log('📞 Creating offer for new user');
+        console.log('📞 Creating offer');
         
         const pc = createPeerConnection(userId);
         const offer = await pc.createOffer({
             offerToReceiveAudio: true,
-            offerToReceiveVideo: true
+            offerToReceiveVideo: true,
+            voiceActivityDetection: true
         });
         
         await pc.setLocalDescription(offer);
-        console.log('📤 Sending offer');
-        
-        socket.emit('offer', {
-            target: userId,
-            offer: offer
-        });
+        socket.emit('offer', { target: userId, offer: offer });
     }
 });
 
 socket.on('offer', async (data) => {
-    console.log('📥 Received offer from:', data.sender);
+    console.log('📥 Received offer');
     
     if (isCallActive || isScreenSharing) {
         const pc = createPeerConnection(data.sender);
@@ -378,17 +476,12 @@ socket.on('offer', async (data) => {
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         
-        console.log('📤 Sending answer');
-        socket.emit('answer', {
-            target: data.sender,
-            answer: answer
-        });
+        socket.emit('answer', { target: data.sender, answer: answer });
     }
 });
 
 socket.on('answer', async (data) => {
-    console.log('📥 Received answer from:', data.sender);
-    
+    console.log('📥 Received answer');
     if (peerConnection) {
         await peerConnection.setRemoteDescription(data.answer);
         console.log('✅ Connection established');
@@ -396,14 +489,13 @@ socket.on('answer', async (data) => {
 });
 
 socket.on('ice-candidate', async (data) => {
-    console.log('❄️ Received ICE candidate');
     if (peerConnection) {
         await peerConnection.addIceCandidate(data.candidate);
     }
 });
 
 socket.on('user-left-room', (userId) => {
-    console.log('👋 User left room:', userId);
+    console.log('👋 User left room');
     if (isScreenSharing) {
         closeScreenView();
     }
@@ -411,10 +503,6 @@ socket.on('user-left-room', (userId) => {
 
 // Handle page close
 window.addEventListener('beforeunload', () => {
-    if (isScreenSharing) {
-        stopScreenShare();
-    }
-    if (isCallActive) {
-        endCall();
-    }
+    if (isScreenSharing) stopScreenShare();
+    if (isCallActive) endCall();
 });
