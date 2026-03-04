@@ -1,31 +1,56 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Watch Together</title>
+  <title>WatchTogether PRO</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<h1>🎬 Watch Together</h1>
+<!-- JOIN SCREEN -->
+<div id="joinScreen">
+  <h2>Join Room</h2>
+  <input id="username" placeholder="Username">
+  <input id="roomId" placeholder="Room ID">
+  <button onclick="joinRoom()">Join</button>
+</div>
 
-<div class="container">
+<!-- MAIN APP -->
+<div id="app" style="display:none;">
 
-  <div id="chat"></div>
-  
-  <input id="msg" placeholder="Type message">
-  <button onclick="sendMessage()">Send</button>
+  <div class="top-bar">
+    <span id="roomLabel"></span>
+    <button onclick="copyInvite()">Copy Invite</button>
+  </div>
 
-  <br>
+  <div class="main">
 
-  <button onclick="startVoice()">🎙️ Voice Chat</button>
-  <button onclick="startScreen()">🖥️ Share Screen</button>
+    <!-- Shared Screen Video -->
+    <video id="screenVideo" autoplay playsinline></video>
 
-  <video id="video" autoplay playsinline></video>
+    <!-- Sidebar: Users + Chat -->
+    <div class="sidebar">
+      <h3>Users</h3>
+      <div id="users"></div>
+
+      <h3>Chat</h3>
+      <div id="chat"></div>
+      <input id="chatInput" placeholder="Type message..." 
+             onkeydown="if(event.key==='Enter') sendMessage()">
+    </div>
+
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <button onclick="toggleMic()">Mute</button>
+    <button onclick="startScreenShare()">Share Screen</button>
+    <button onclick="leaveRoom()">Leave</button>
+  </div>
 
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
-<script src="app.js"></script>
-
+<script src="script.js"></script>
 </body>
 </html>

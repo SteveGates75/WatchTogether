@@ -1,18 +1,23 @@
 {
-  "name": "watchtogether",
+  "name": "watchtogether-pro",
   "version": "1.0.0",
-  "description": "",
+  "description": "WatchTogether PRO - screen share + voice chat + text chat",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
+  "keywords": [
+    "watch together",
+    "screen share",
+    "webrtc",
+    "socket.io",
+    "chat"
+  ],
+  "author": "Peter Parker",
+  "license": "MIT",
   "dependencies": {
-    "express": "^5.2.1",
-    "socket.io": "^4.8.3"
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "uuid": "^9.0.0"
   }
 }
