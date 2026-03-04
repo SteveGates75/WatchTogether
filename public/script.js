@@ -13,6 +13,7 @@ async function joinRoom() {
   roomId = document.getElementById("roomId").value;
   if (!username || !roomId) return alert("Enter info");
 
+  // get microphone
   localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
   socket.emit("join-room", { roomId, username });
@@ -22,9 +23,11 @@ async function joinRoom() {
   document.getElementById("roomLabel").innerText = "Room: " + roomId;
 }
 
+// Create peer connection for each existing user
 socket.on("existing-users", users => users.forEach(id => createPeer(id, true)));
 socket.on("user-joined", id => createPeer(id, false));
 
+// Handle signaling
 socket.on("signal", async ({ from, data }) => {
   const peer = peers[from];
   if (!peer) return;
@@ -42,7 +45,9 @@ function createPeer(id, initiator) {
   const peer = new RTCPeerConnection(config);
   peers[id] = peer;
 
+  // add local audio
   localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
+  // add screen if already sharing
   if (screenStream) screenStream.getTracks().forEach(track => peer.addTrack(track, screenStream));
 
   peer.onicecandidate = e => { if(e.candidate) socket.emit("signal", { to: id, data: e.candidate }); };
@@ -59,13 +64,22 @@ function createPeer(id, initiator) {
   }
 }
 
+// screen share with audio
 async function startScreenShare() {
-  screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { width: 1920, height: 1080 }, audio: true });
+  screenStream = await navigator.mediaDevices.getDisplayMedia({ video:{width:1920,height:1080}, audio:true });
   const videoTrack = screenStream.getVideoTracks()[0];
+
   Object.values(peers).forEach(peer => {
+    // replace existing video track
     const sender = peer.getSenders().find(s => s.track.kind === "video");
-    if(sender) sender.replaceTrack(videoTrack); else peer.addTrack(videoTrack, screenStream);
+    if(sender) sender.replaceTrack(videoTrack);
+    else peer.addTrack(videoTrack, screenStream);
+
+    // add audio track from screen
+    const audioTrack = screenStream.getAudioTracks()[0];
+    if(audioTrack) peer.addTrack(audioTrack, screenStream);
   });
+
   document.getElementById("screenVideo").srcObject = screenStream;
   socket.emit("start-screen");
 }
@@ -89,8 +103,7 @@ socket.on("chat-message", data => {
 });
 
 socket.on("user-list", users => {
-  const div = document.getElementById("users");
-  div.innerHTML = Object.values(users).map(u => `<div>${u}</div>`).join("");
+  document.getElementById("users").innerHTML = Object.values(users).map(u => `<div>${u}</div>`).join("");
 });
 
 socket.on("screen-started", sharerId => {});

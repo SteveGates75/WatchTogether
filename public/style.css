@@ -1,18 +1,11 @@
-body {
-  margin: 0;
-  background: #1e1f22;
-  color: white;
-  font-family: Arial;
-}
-
-#joinScreen { text-align: center; margin-top: 100px; }
-input { padding: 8px; margin: 5px; }
-button { padding: 8px 12px; background: #5865f2; color: white; border: none; border-radius: 5px; }
-
-.top-bar { background: #2b2d31; padding: 10px; }
-.main { display: flex; height: calc(100vh - 120px); }
-#screenVideo { flex: 3; background: black; width: 100%; }
-.sidebar { flex: 1; background: #2b2d31; padding: 10px; display: flex; flex-direction: column; }
-#users { margin-bottom: 10px; }
-#chat { flex: 1; overflow-y: auto; background: #1e1f22; padding: 5px; margin-bottom: 5px; }
-.controls { background: #2b2d31; padding: 10px; text-align: center; }
+body { margin:0; font-family:Arial; background:#1e1f22; color:white; }
+#joinScreen { text-align:center; margin-top:100px; }
+input { padding:8px; margin:5px; }
+button { padding:8px 12px; background:#5865f2; border:none; border-radius:5px; color:white; }
+.top-bar { background:#2b2d31; padding:10px; }
+.main { display:flex; height:calc(100vh - 120px); }
+#screenVideo { flex:3; background:black; width:100%; }
+.sidebar { flex:1; background:#2b2d31; padding:10px; display:flex; flex-direction:column; }
+#users { margin-bottom:10px; }
+#chat { flex:1; overflow-y:auto; background:#1e1f22; padding:5px; margin-bottom:5px; }
+.controls { background:#2b2d31; padding:10px; text-align:center; }
