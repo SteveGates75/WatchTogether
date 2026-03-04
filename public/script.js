@@ -9,17 +9,24 @@ let callButton = null;
 let screenButton = null;
 let remoteAudio = null;
 let remoteScreen = null;
+let currentQuality = 'auto';
+let bandwidthInterval = null;
+let lastBitrate = 0;
 
-// Better STUN servers for faster connection
+// More STUN servers for better connection
 const configuration = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' }
+        { urls: 'stun:stun4.l.google.com:19302' },
+        { urls: 'stun:stun.ekiga.net:19302' },
+        { urls: 'stun:stun.ideasip.com:19302' }
     ],
-    iceCandidatePoolSize: 10
+    iceCandidatePoolSize: 10,
+    bundlePolicy: 'max-bundle',
+    rtcpMuxPolicy: 'require'
 };
 
 function login() {
@@ -92,6 +99,86 @@ document.getElementById('message-input').addEventListener('keypress', (e) => {
     }
 });
 
+// Quality selection
+function changeQuality() {
+    const select = document.getElementById('quality-dropdown');
+    currentQuality = select.value;
+    console.log('📊 Quality changed to:', currentQuality);
+    
+    if (isScreenSharing && screenStream) {
+        // Restart screen share with new quality
+        stopScreenShare();
+        setTimeout(() => startScreenShare(), 500);
+    }
+}
+
+// Get video constraints based on quality setting
+function getVideoConstraints() {
+    switch(currentQuality) {
+        case '480p':
+            return {
+                width: { ideal: 854, max: 854 },
+                height: { ideal: 480, max: 480 },
+                frameRate: { ideal: 30, max: 30 }
+            };
+        case '720p':
+            return {
+                width: { ideal: 1280, max: 1280 },
+                height: { ideal: 720, max: 720 },
+                frameRate: { ideal: 30, max: 30 }
+            };
+        case '1080p30':
+            return {
+                width: { ideal: 1920, max: 1920 },
+                height: { ideal: 1080, max: 1080 },
+                frameRate: { ideal: 30, max: 30 }
+            };
+        case '1080p60':
+            return {
+                width: { ideal: 1920, max: 1920 },
+                height: { ideal: 1080, max: 1080 },
+                frameRate: { ideal: 60, max: 60 }
+            };
+        case 'auto':
+        default:
+            // Auto mode - detect bandwidth
+            const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+            if (connection) {
+                const downlink = connection.downlink || 10;
+                if (downlink < 3) {
+                    return {
+                        width: { ideal: 854, max: 1280 },
+                        height: { ideal: 480, max: 720 },
+                        frameRate: { ideal: 24, max: 30 }
+                    };
+                } else if (downlink < 6) {
+                    return {
+                        width: { ideal: 1280, max: 1280 },
+                        height: { ideal: 720, max: 720 },
+                        frameRate: { ideal: 30, max: 30 }
+                    };
+                } else if (downlink < 10) {
+                    return {
+                        width: { ideal: 1920, max: 1920 },
+                        height: { ideal: 1080, max: 1080 },
+                        frameRate: { ideal: 30, max: 30 }
+                    };
+                } else {
+                    return {
+                        width: { ideal: 1920, max: 1920 },
+                        height: { ideal: 1080, max: 1080 },
+                        frameRate: { ideal: 60, max: 60 }
+                    };
+                }
+            }
+            return {
+                width: { ideal: 1920, max: 1920 },
+                height: { ideal: 1080, max: 1080 },
+                frameRate: { ideal: 30, max: 30 }
+            };
+    }
+}
+
 // Toggle audio call
 async function toggleCall() {
     if (isCallActive) {
@@ -101,7 +188,7 @@ async function toggleCall() {
     }
 }
 
-// OPTIMIZED: Start audio call with better quality
+// Start audio call with better quality
 async function startAudioCall() {
     try {
         console.log('🎤 Starting audio call...');
@@ -115,14 +202,14 @@ async function startAudioCall() {
                 autoGainControl: true,
                 sampleRate: 48000,
                 channelCount: 2,
-                volume: 1.0
+                volume: 1.0,
+                latency: 0.01
             }
         });
         
         // Optimize audio settings
         const audioTrack = localStream.getAudioTracks()[0];
         if (audioTrack) {
-            const constraints = audioTrack.getConstraints();
             await audioTrack.applyConstraints({
                 volume: 1.0,
                 sampleRate: 48000,
@@ -186,49 +273,18 @@ async function toggleScreenShare() {
     }
 }
 
-// OPTIMIZED: Start 1080p screen share with better bitrate control
+// Start screen share with selected quality
 async function startScreenShare() {
     try {
-        console.log('📺 Starting optimized screen share...');
+        console.log('📺 Starting screen share with quality:', currentQuality);
         
         updateStatus('Requesting screen access...', 'connecting');
+        document.getElementById('quality-selector').classList.add('active');
         
-        // Check bandwidth first
-        const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-        let bandwidth = 'high';
-        if (connection) {
-            const downlink = connection.downlink || 10;
-            if (downlink < 2) bandwidth = 'low';
-            else if (downlink < 5) bandwidth = 'medium';
-            else bandwidth = 'high';
-        }
+        // Get video constraints based on selected quality
+        const videoConstraints = getVideoConstraints();
         
-        console.log('📊 Detected bandwidth:', bandwidth);
-        
-        // Adjust quality based on bandwidth
-        let videoConstraints = {
-            width: { ideal: 1920, max: 1920 },
-            height: { ideal: 1080, max: 1080 },
-            frameRate: { ideal: 30 }
-        };
-        
-        if (bandwidth === 'low') {
-            videoConstraints = {
-                width: { ideal: 854, max: 1280 },
-                height: { ideal: 480, max: 720 },
-                frameRate: { ideal: 15, max: 20 }
-            };
-            updateBitrate('Low bandwidth mode (480p)');
-        } else if (bandwidth === 'medium') {
-            videoConstraints = {
-                width: { ideal: 1280, max: 1280 },
-                height: { ideal: 720, max: 720 },
-                frameRate: { ideal: 24, max: 30 }
-            };
-            updateBitrate('Medium bandwidth mode (720p)');
-        } else {
-            updateBitrate('High bandwidth mode (1080p)');
-        }
+        console.log('📊 Video constraints:', videoConstraints);
         
         // Request screen share
         screenStream = await navigator.mediaDevices.getDisplayMedia({ 
@@ -237,7 +293,8 @@ async function startScreenShare() {
                 echoCancellation: true,
                 noiseSuppression: true,
                 autoGainControl: true,
-                sampleRate: 48000
+                sampleRate: 48000,
+                channelCount: 2
             }
         });
         
@@ -245,14 +302,14 @@ async function startScreenShare() {
         const videoTrack = screenStream.getVideoTracks()[0];
         if (videoTrack) {
             const settings = videoTrack.getSettings();
-            console.log('📊 Screen resolution:', settings);
+            console.log('📊 Actual screen resolution:', settings);
             
-            // Apply additional constraints for smoother playback
-            await videoTrack.applyConstraints({
-                width: { ideal: settings.width },
-                height: { ideal: settings.height },
-                frameRate: { ideal: 30, max: 30 }
-            });
+            // Show quality indicator
+            const fps = settings.frameRate || 30;
+            const height = settings.height || 1080;
+            const quality = height >= 1080 ? '1080p' : height >= 720 ? '720p' : '480p';
+            document.getElementById('quality-indicator').innerHTML = `📺 ${quality} ${fps}fps`;
+            document.getElementById('quality-indicator').classList.add('visible');
         }
         
         // Handle audio
@@ -270,6 +327,7 @@ async function startScreenShare() {
                 });
                 micStream.getAudioTracks().forEach(track => {
                     screenStream.addTrack(track);
+                    console.log('Added microphone track');
                 });
             } catch (micError) {
                 console.warn('Could not add microphone:', micError);
@@ -286,6 +344,9 @@ async function startScreenShare() {
         socket.emit('join-room', 'main-room');
         isScreenSharing = true;
         
+        // Start monitoring bandwidth
+        startBandwidthMonitoring();
+        
         // Handle stop event
         screenStream.getVideoTracks()[0].onended = () => {
             console.log('Screen sharing stopped');
@@ -298,6 +359,7 @@ async function startScreenShare() {
             alert('Could not share screen: ' + err.message);
         }
         updateStatus('', '');
+        document.getElementById('quality-selector').classList.remove('active');
     }
 }
 
@@ -316,13 +378,73 @@ function stopScreenShare() {
     
     if (!isCallActive) {
         updateStatus('', '');
+        document.getElementById('quality-selector').classList.remove('active');
     } else {
         updateStatus('Audio only', 'connected');
     }
     
     document.getElementById('quality-indicator').classList.remove('visible');
-    updateBitrate('');
+    document.getElementById('bitrate-indicator').classList.remove('visible');
+    
+    if (bandwidthInterval) {
+        clearInterval(bandwidthInterval);
+        bandwidthInterval = null;
+    }
+    
     isScreenSharing = false;
+}
+
+// Start bandwidth monitoring
+function startBandwidthMonitoring() {
+    if (bandwidthInterval) {
+        clearInterval(bandwidthInterval);
+    }
+    
+    bandwidthInterval = setInterval(async () => {
+        if (peerConnection && isScreenSharing) {
+            try {
+                const stats = await peerConnection.getStats();
+                let bitrate = 0;
+                
+                stats.forEach(report => {
+                    if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                        if (report.availableOutgoingBitrate) {
+                            bitrate = report.availableOutgoingBitrate;
+                        }
+                    }
+                });
+                
+                if (bitrate > 0) {
+                    const mbps = (bitrate / 1000000).toFixed(1);
+                    document.getElementById('bitrate-indicator').innerHTML = `📊 ${mbps} Mbps`;
+                    document.getElementById('bitrate-indicator').classList.add('visible');
+                    
+                    // Auto-adjust if in auto mode
+                    if (currentQuality === 'auto' && isScreenSharing) {
+                        const videoTrack = screenStream?.getVideoTracks()[0];
+                        if (videoTrack) {
+                            const settings = videoTrack.getSettings();
+                            const currentFps = settings.frameRate || 30;
+                            
+                            // Adjust based on bitrate
+                            if (bitrate < 2000000 && currentFps > 24) { // Less than 2 Mbps
+                                console.log('Auto-reducing frame rate due to low bandwidth');
+                                videoTrack.applyConstraints({ frameRate: 20 });
+                            } else if (bitrate > 5000000 && currentFps < 30) { // More than 5 Mbps
+                                console.log('Auto-increasing frame rate');
+                                videoTrack.applyConstraints({ frameRate: 30 });
+                            } else if (bitrate > 10000000 && currentFps < 60) { // More than 10 Mbps
+                                console.log('Auto-increasing to 60fps');
+                                videoTrack.applyConstraints({ frameRate: 60 });
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.log('Stats error:', e);
+            }
+        }
+    }, 2000);
 }
 
 // Close fullscreen view
@@ -341,18 +463,7 @@ function updateStatus(text, type) {
     }
 }
 
-// Update bitrate display
-function updateBitrate(text) {
-    const bitrateStatus = document.getElementById('bitrate-status');
-    if (text) {
-        bitrateStatus.textContent = text;
-        bitrateStatus.classList.add('active');
-    } else {
-        bitrateStatus.classList.remove('active');
-    }
-}
-
-// OPTIMIZED: Create peer connection with better settings
+// Create peer connection with better settings
 function createPeerConnection(peerId) {
     console.log('🔄 Creating optimized peer connection');
     
@@ -363,36 +474,35 @@ function createPeerConnection(peerId) {
     if (activeStream) {
         activeStream.getTracks().forEach(track => {
             console.log(`➕ Adding ${track.kind} track`);
-            pc.addTrack(track, activeStream);
+            
+            // Set high priority for video
+            if (track.kind === 'video') {
+                pc.addTransceiver(track, {
+                    direction: 'sendonly',
+                    streams: [activeStream],
+                    sendEncodings: [
+                        { maxBitrate: 20000000 } // 20 Mbps max
+                    ]
+                });
+            } else {
+                pc.addTrack(track, activeStream);
+            }
         });
     }
     
-    // Handle incoming tracks with optimizations
+    // Handle incoming tracks
     pc.ontrack = (event) => {
         console.log(`📥 Received ${event.track.kind} track`);
         
         if (event.track.kind === 'audio') {
-            // Optimized audio playback
             remoteAudio.srcObject = event.streams[0];
             remoteAudio.volume = 1.0;
             remoteAudio.play()
                 .then(() => console.log('✅ Audio playing'))
                 .catch(e => console.log('Audio play error:', e));
         } else if (event.track.kind === 'video') {
-            // Optimized video playback
             remoteScreen.srcObject = event.streams[0];
             document.getElementById('screen-container').classList.add('active');
-            document.getElementById('quality-indicator').classList.add('visible');
-            
-            // Get video settings
-            const settings = event.track.getSettings();
-            const resolution = settings.width >= 1920 ? '1080p' : 
-                             settings.width >= 1280 ? '720p' : '480p';
-            document.getElementById('quality-indicator').innerHTML = `📺 ${resolution} ${settings.frameRate || 30}fps`;
-            
-            remoteScreen.play()
-                .then(() => console.log('✅ Video playing'))
-                .catch(e => console.log('Video play error:', e));
         }
     };
     
@@ -406,7 +516,7 @@ function createPeerConnection(peerId) {
         }
     };
     
-    // Monitor connection stats
+    // Monitor connection
     pc.onconnectionstatechange = () => {
         console.log('📊 Connection state:', pc.connectionState);
         if (pc.connectionState === 'connected') {
@@ -415,36 +525,16 @@ function createPeerConnection(peerId) {
             } else if (isCallActive) {
                 updateStatus('Connected - Audio active', 'connected');
             }
-            
-            // Start monitoring stats
-            monitorConnectionStats(pc);
         }
+    };
+    
+    // Monitor ICE connection
+    pc.oniceconnectionstatechange = () => {
+        console.log('❄️ ICE state:', pc.iceConnectionState);
     };
     
     peerConnection = pc;
     return pc;
-}
-
-// Monitor connection statistics
-async function monitorConnectionStats(pc) {
-    try {
-        const stats = await pc.getStats();
-        stats.forEach(report => {
-            if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-                if (report.availableOutgoingBitrate) {
-                    const bitrate = (report.availableOutgoingBitrate / 1000000).toFixed(1);
-                    console.log(`📊 Available bitrate: ${bitrate} Mbps`);
-                }
-            }
-            if (report.type === 'outbound-rtp' && report.mediaType === 'video') {
-                if (report.qualityLimitationReason !== 'none') {
-                    console.log(`⚠️ Quality limited by: ${report.qualityLimitationReason}`);
-                }
-            }
-        });
-    } catch (e) {
-        console.log('Stats monitoring error:', e);
-    }
 }
 
 // Signaling events
@@ -505,4 +595,5 @@ socket.on('user-left-room', (userId) => {
 window.addEventListener('beforeunload', () => {
     if (isScreenSharing) stopScreenShare();
     if (isCallActive) endCall();
+    if (bandwidthInterval) clearInterval(bandwidthInterval);
 });
