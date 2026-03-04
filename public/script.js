@@ -1,19 +1,15 @@
 const socket = io();
 let currentUser = '';
 let localStream = null;
-let screenStream = null;
 let peerConnections = {};
 let isCallActive = false;
-let isScreenSharing = false;
 
-// Better STUN servers for connection
+// STUN servers for better connection
 const configuration = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' }
+        { urls: 'stun:stun2.l.google.com:19302' }
     ]
 };
 
@@ -79,93 +75,21 @@ document.getElementById('message-input').addEventListener('keypress', (e) => {
     }
 });
 
-// IMPROVED: Video call with better audio handling
+// SIMPLIFIED: Start call with explicit audio first
 async function startCall() {
     try {
-        console.log('Starting call...');
+        console.log('Starting call - requesting microphone...');
         
-        // Stop any existing streams
-        if (localStream) {
-            localStream.getTracks().forEach(track => track.stop());
-        }
+        // First, just test microphone alone
+        const audioOnly = await navigator.mediaDevices.getUserMedia({ audio: true });
+        console.log('✅ Microphone access granted!');
+        console.log('Audio tracks:', audioOnly.getAudioTracks().length);
         
-        // Request both video and audio with specific settings
+        // Now get both video and audio
         localStream = await navigator.mediaDevices.getUserMedia({ 
-            video: { 
-                width: { ideal: 1920, max: 1920 },
-                height: { ideal: 1080, max: 1080 },
-                frameRate: { ideal: 30, max: 30 }
-            }, 
-            audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true
-            }
-        });
-        
-        // Check if audio tracks exist
-        const audioTracks = localStream.getAudioTracks();
-        if (audioTracks.length === 0) {
-            console.warn('No audio tracks found');
-            alert('Warning: No microphone detected. Voice may not work.');
-        } else {
-            console.log('Audio track found:', audioTracks[0].label);
-            // Enable audio
-            audioTracks[0].enabled = true;
-        }
-        
-        // Display local video
-        const localVideo = document.getElementById('local-video');
-        localVideo.srcObject = localStream;
-        
-        // Ensure video plays
-        try {
-            await localVideo.play();
-        } catch (playError) {
-            console.error('Error playing video:', playError);
-        }
-        
-        // Show video container
-        document.getElementById('video-container').style.display = 'block';
-        
-        // Join room for video call
-        socket.emit('join-room', 'video-room-1');
-        isCallActive = true;
-        
-        console.log('Call started successfully');
-        
-    } catch (err) {
-        console.error('Error accessing media devices:', err);
-        let errorMessage = 'Could not access camera or microphone. ';
-        
-        if (err.name === 'NotAllowedError') {
-            errorMessage += 'Please allow camera and microphone access in your browser settings.';
-        } else if (err.name === 'NotFoundError') {
-            errorMessage += 'No camera or microphone found.';
-        } else if (err.name === 'NotReadableError') {
-            errorMessage += 'Your camera or microphone is already in use by another app.';
-        }
-        
-        alert(errorMessage);
-    }
-}
-
-// IMPROVED: Screen sharing with audio
-async function shareScreen() {
-    try {
-        console.log('Starting screen share...');
-        
-        // Stop any existing screen stream
-        if (screenStream) {
-            screenStream.getTracks().forEach(track => track.stop());
-        }
-        
-        // Request screen sharing with audio
-        screenStream = await navigator.mediaDevices.getDisplayMedia({ 
-            video: { 
-                width: { ideal: 1920, max: 1920 },
-                height: { ideal: 1080, max: 1080 },
-                frameRate: { ideal: 30, max: 30 }
+            video: {
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
             },
             audio: {
                 echoCancellation: true,
@@ -174,129 +98,99 @@ async function shareScreen() {
             }
         });
         
-        // Check if we got audio (system audio)
-        const audioTracks = screenStream.getAudioTracks();
-        if (audioTracks.length === 0) {
-            console.log('No system audio - will use microphone instead');
-            // If no system audio, get microphone separately
-            try {
-                const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                micStream.getAudioTracks().forEach(track => {
-                    screenStream.addTrack(track);
-                });
-                console.log('Added microphone for audio');
-            } catch (micError) {
-                console.warn('Could not get microphone:', micError);
-            }
-        } else {
-            console.log('System audio captured successfully');
+        // Log audio track info
+        const audioTracks = localStream.getAudioTracks();
+        console.log('Audio tracks in main stream:', audioTracks.length);
+        if (audioTracks.length > 0) {
+            console.log('Audio track settings:', audioTracks[0].getSettings());
+            // Make sure audio is enabled
             audioTracks[0].enabled = true;
         }
         
-        // Replace local video with screen stream
+        // Display local video
         const localVideo = document.getElementById('local-video');
-        localVideo.srcObject = screenStream;
-        
-        // Ensure video plays
-        try {
-            await localVideo.play();
-        } catch (playError) {
-            console.error('Error playing video:', playError);
-        }
+        localVideo.srcObject = localStream;
+        await localVideo.play();
         
         // Show video container
         document.getElementById('video-container').style.display = 'block';
         
-        // Join room for video call
+        // Join room
         socket.emit('join-room', 'video-room-1');
         isCallActive = true;
-        isScreenSharing = true;
         
-        // Update button text
-        const shareButton = document.querySelector('.call-controls button:nth-child(2)');
-        if (shareButton) {
-            shareButton.textContent = 'Stop Sharing';
-            shareButton.onclick = stopScreenShare;
-        }
-        
-        console.log('Screen share started successfully');
-        
-        // Handle when user stops sharing via browser UI
-        screenStream.getVideoTracks()[0].onended = () => {
-            console.log('Screen sharing stopped by user');
-            stopScreenShare();
-        };
+        alert('✅ Microphone is working! Say something and check if the audio indicator moves in your browser tab');
         
     } catch (err) {
-        console.error('Error sharing screen:', err);
-        if (err.name !== 'NotAllowedError' && err.name !== 'PermissionDeniedError') {
-            alert('Could not share screen. Please try again.');
-        }
+        console.error('Error accessing media:', err);
+        alert('Microphone error: ' + err.message);
     }
 }
 
-// Stop screen sharing and switch back to camera
-async function stopScreenShare() {
-    if (screenStream) {
-        screenStream.getTracks().forEach(track => track.stop());
-        screenStream = null;
-    }
-    
-    // Switch back to camera
+// SIMPLIFIED: Screen sharing with audio focus
+async function shareScreen() {
     try {
-        localStream = await navigator.mediaDevices.getUserMedia({ 
-            video: { width: 1920, height: 1080 }, 
-            audio: true 
+        console.log('Starting screen share...');
+        
+        // Get screen with audio
+        localStream = await navigator.mediaDevices.getDisplayMedia({ 
+            video: true,
+            audio: true  // This captures system audio
         });
         
+        // Check if we have audio
+        const audioTracks = localStream.getAudioTracks();
+        console.log('Screen share audio tracks:', audioTracks.length);
+        
+        // If no system audio, add microphone
+        if (audioTracks.length === 0) {
+            console.log('No system audio, adding microphone...');
+            const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            micStream.getAudioTracks().forEach(track => {
+                localStream.addTrack(track);
+                console.log('Added microphone track');
+            });
+        } else {
+            audioTracks[0].enabled = true;
+            console.log('System audio captured');
+        }
+        
+        // Display
         const localVideo = document.getElementById('local-video');
         localVideo.srcObject = localStream;
+        await localVideo.play();
         
-        // Update all peer connections with new stream
-        Object.keys(peerConnections).forEach(peerId => {
-            const pc = peerConnections[peerId];
-            const sender = pc.getSenders().find(s => s.track.kind === 'video');
-            if (sender) {
-                sender.replaceTrack(localStream.getVideoTracks()[0]);
-            }
-        });
+        document.getElementById('video-container').style.display = 'block';
+        socket.emit('join-room', 'video-room-1');
+        isCallActive = true;
         
     } catch (err) {
-        console.error('Error switching back to camera:', err);
-    }
-    
-    isScreenSharing = false;
-    
-    // Reset button
-    const shareButton = document.querySelector('.call-controls button:nth-child(2)');
-    if (shareButton) {
-        shareButton.textContent = 'Share Screen';
-        shareButton.onclick = shareScreen;
+        console.error('Screen share error:', err);
     }
 }
 
-// IMPROVED: Create peer connection with better audio handling
+// SIMPLIFIED: Create peer connection
 function createPeerConnection(peerId) {
+    console.log('Creating peer connection for:', peerId);
+    
     const pc = new RTCPeerConnection(configuration);
     
-    // Get current stream (either screen or camera)
-    const currentStream = screenStream || localStream;
-    
-    if (!currentStream) {
-        console.error('No stream available for peer connection');
+    // Add all tracks from local stream
+    if (localStream) {
+        localStream.getTracks().forEach(track => {
+            console.log(`Adding ${track.kind} track to peer ${peerId}`);
+            pc.addTrack(track, localStream);
+        });
+    } else {
+        console.error('No local stream available');
         return null;
     }
     
-    // Add all tracks from current stream
-    currentStream.getTracks().forEach(track => {
-        console.log(`Adding track to peer ${peerId}:`, track.kind, track.label);
-        pc.addTrack(track, currentStream);
-    });
-    
     // Handle incoming tracks
     pc.ontrack = (event) => {
-        console.log(`Received track from ${peerId}:`, event.track.kind);
+        console.log(`Received ${event.track.kind} track from ${peerId}`);
         
+        // Get or create video element
         let remoteVideoContainer = document.getElementById('remote-videos');
         let videoEl = document.getElementById(`remote-${peerId}`);
         
@@ -317,18 +211,16 @@ function createPeerConnection(peerId) {
             remoteVideoContainer.appendChild(videoBox);
         }
         
-        // Set remote stream
+        // Set stream
         if (!videoEl.srcObject) {
             videoEl.srcObject = new MediaStream();
         }
+        videoEl.srcObject.addTrack(event.track);
         
-        // Add track to the stream
-        if (event.track) {
-            videoEl.srcObject.addTrack(event.track);
+        // For audio tracks, also play them (they play automatically)
+        if (event.track.kind === 'audio') {
+            console.log('Audio track received and should be playing');
         }
-        
-        // Ensure video plays
-        videoEl.play().catch(e => console.log('Autoplay prevented:', e));
     };
     
     // Handle ICE candidates
@@ -341,25 +233,16 @@ function createPeerConnection(peerId) {
         }
     };
     
-    // Log connection state changes
+    // Monitor connection state
     pc.onconnectionstatechange = () => {
-        console.log(`Connection state with ${peerId}:`, pc.connectionState);
-        if (pc.connectionState === 'connected') {
-            console.log(`Successfully connected to ${peerId}`);
-        } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-            console.log(`Connection failed with ${peerId}`);
-        }
-    };
-    
-    pc.oniceconnectionstatechange = () => {
-        console.log(`ICE connection state with ${peerId}:`, pc.iceConnectionState);
+        console.log(`Connection with ${peerId}:`, pc.connectionState);
     };
     
     peerConnections[peerId] = pc;
     return pc;
 }
 
-// Rest of the WebRTC signaling remains the same
+// WebRTC Signaling
 async function makeOffer(peerId) {
     try {
         console.log('Making offer to:', peerId);
@@ -372,23 +255,16 @@ async function makeOffer(peerId) {
         });
         
         await pc.setLocalDescription(offer);
+        socket.emit('offer', { target: peerId, offer: offer });
         
-        socket.emit('offer', {
-            target: peerId,
-            offer: offer
-        });
-        
-        console.log('Offer sent to:', peerId);
     } catch (err) {
-        console.error('Error making offer:', err);
+        console.error('Offer error:', err);
     }
 }
 
 socket.on('existing-users', (users) => {
-    console.log('Existing users in room:', users);
-    users.forEach(user => {
-        makeOffer(user.id);
-    });
+    console.log('Existing users:', users);
+    users.forEach(user => makeOffer(user.id));
 });
 
 socket.on('user-connected', (user) => {
@@ -406,14 +282,10 @@ socket.on('offer', async (data) => {
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         
-        socket.emit('answer', {
-            target: data.sender,
-            answer: answer
-        });
+        socket.emit('answer', { target: data.sender, answer: answer });
         
-        console.log('Answer sent to:', data.sender);
     } catch (err) {
-        console.error('Error handling offer:', err);
+        console.error('Answer error:', err);
     }
 });
 
@@ -423,80 +295,48 @@ socket.on('answer', async (data) => {
         const pc = peerConnections[data.sender];
         if (pc) {
             await pc.setRemoteDescription(data.answer);
-            console.log('Remote description set for:', data.sender);
         }
     } catch (err) {
-        console.error('Error handling answer:', err);
+        console.error('Answer handling error:', err);
     }
 });
 
 socket.on('ice-candidate', async (data) => {
     try {
-        console.log('Received ICE candidate from:', data.sender);
         const pc = peerConnections[data.sender];
         if (pc) {
             await pc.addIceCandidate(data.candidate);
         }
     } catch (err) {
-        console.error('Error adding ICE candidate:', err);
+        console.error('ICE candidate error:', err);
     }
 });
 
-// Improved end call function
+socket.on('peer-left', (peerId) => {
+    console.log('Peer left:', peerId);
+    const pc = peerConnections[peerId];
+    if (pc) {
+        pc.close();
+        delete peerConnections[peerId];
+    }
+    const videoEl = document.getElementById(`remote-${peerId}`);
+    if (videoEl) {
+        videoEl.parentElement.remove();
+    }
+});
+
 function endCall() {
-    console.log('Ending call...');
-    
-    // Stop all streams
     if (localStream) {
-        localStream.getTracks().forEach(track => {
-            track.stop();
-            console.log('Stopped track:', track.kind);
-        });
+        localStream.getTracks().forEach(track => track.stop());
         localStream = null;
     }
     
-    if (screenStream) {
-        screenStream.getTracks().forEach(track => {
-            track.stop();
-            console.log('Stopped screen track:', track.kind);
-        });
-        screenStream = null;
-    }
-    
-    // Close all peer connections
-    Object.keys(peerConnections).forEach(peerId => {
-        const pc = peerConnections[peerId];
-        pc.close();
-        console.log('Closed connection with:', peerId);
-    });
+    Object.values(peerConnections).forEach(pc => pc.close());
     peerConnections = {};
     
-    // Reset UI
     document.getElementById('video-container').style.display = 'none';
     document.getElementById('remote-videos').innerHTML = '';
-    
-    // Clear local video
-    const localVideo = document.getElementById('local-video');
-    localVideo.srcObject = null;
-    
-    // Reset button if screen sharing was active
-    if (isScreenSharing) {
-        const shareButton = document.querySelector('.call-controls button:nth-child(2)');
-        if (shareButton) {
-            shareButton.textContent = 'Share Screen';
-            shareButton.onclick = shareScreen;
-        }
-    }
+    document.getElementById('local-video').srcObject = null;
     
     isCallActive = false;
-    isScreenSharing = false;
-    console.log('Call ended');
 }
-
-// Handle disconnection
-socket.on('disconnect', () => {
-    console.log('Disconnected from server');
-    if (isCallActive) {
-        endCall();
-    }
-});
