@@ -7,7 +7,6 @@
 </head>
 <body>
 
-<!-- JOIN SCREEN -->
 <div id="joinScreen">
   <h2>Join Room</h2>
   <input id="username" placeholder="Username">
@@ -15,20 +14,15 @@
   <button onclick="joinRoom()">Join</button>
 </div>
 
-<!-- MAIN APP -->
 <div id="app" style="display:none;">
-
   <div class="top-bar">
     <span id="roomLabel"></span>
     <button onclick="copyInvite()">Copy Invite</button>
   </div>
 
   <div class="main">
-
-    <!-- Shared Screen Video -->
     <video id="screenVideo" autoplay playsinline></video>
 
-    <!-- Sidebar: Users + Chat -->
     <div class="sidebar">
       <h3>Users</h3>
       <div id="users"></div>
@@ -38,16 +32,13 @@
       <input id="chatInput" placeholder="Type message..." 
              onkeydown="if(event.key==='Enter') sendMessage()">
     </div>
-
   </div>
 
-  <!-- Controls -->
   <div class="controls">
     <button onclick="toggleMic()">Mute</button>
     <button onclick="startScreenShare()">Share Screen</button>
     <button onclick="leaveRoom()">Leave</button>
   </div>
-
 </div>
 
 <script src="/socket.io/socket.io.js"></script>

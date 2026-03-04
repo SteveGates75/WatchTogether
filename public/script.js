@@ -13,7 +13,6 @@ async function joinRoom() {
   roomId = document.getElementById("roomId").value;
   if (!username || !roomId) return alert("Enter info");
 
-  // get microphone audio
   localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
   socket.emit("join-room", { roomId, username });
@@ -23,11 +22,7 @@ async function joinRoom() {
   document.getElementById("roomLabel").innerText = "Room: " + roomId;
 }
 
-// SIGNALING HANDLERS
-socket.on("existing-users", users => {
-  users.forEach(id => createPeer(id, true));
-});
-
+socket.on("existing-users", users => users.forEach(id => createPeer(id, true)));
 socket.on("user-joined", id => createPeer(id, false));
 
 socket.on("signal", async ({ from, data }) => {
@@ -40,31 +35,31 @@ socket.on("signal", async ({ from, data }) => {
     await peer.setLocalDescription(answer);
     socket.emit("signal", { to: from, data: answer });
   }
-
-  if (data.type === "answer") {
-    await peer.setRemoteDescription(new RTCSessionDescription(data));
-  }
-
-  if (data.candidate) {
-    await peer.addIceCandidate(new RTCIceCandidate(data));
-  }
+  if (data.type === "answer") await peer.setRemoteDescription(new RTCSessionDescription(data));
+  if (data.candidate) await peer.addIceCandidate(new RTCIceCandidate(data));
 });
 
 function createPeer(id, initiator) {
   const peer = new RTCPeerConnection(config);
   peers[id] = peer;
 
-  // add audio
   localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
+
+  peer.ontrack = e => {
+    e.streams.forEach(stream => {
+      if (stream.getVideoTracks().length > 0) document.getElementById("screenVideo").srcObject = stream;
+      if (stream.getAudioTracks().length > 0) {
+        const audio = document.createElement("audio");
+        audio.srcObject = stream;
+        audio.autoplay = true;
+        audio.style.display = "none";
+        document.body.appendChild(audio);
+      }
+    });
+  };
 
   peer.onicecandidate = e => {
     if (e.candidate) socket.emit("signal", { to: id, data: e.candidate });
-  };
-
-  peer.ontrack = e => {
-    // show screen video
-    if (e.streams[0].getVideoTracks().length > 0)
-      document.getElementById("screenVideo").srcObject = e.streams[0];
   };
 
   if (initiator) {
@@ -75,10 +70,10 @@ function createPeer(id, initiator) {
   }
 }
 
-// SCREEN SHARE
 async function startScreenShare() {
   screenStream = await navigator.mediaDevices.getDisplayMedia({
-    video: { width: { ideal: 1920 }, height: { ideal: 1080 } }
+    video: { width: { ideal: 1920 }, height: { ideal: 1080 } },
+    audio: true
   });
 
   const videoTrack = screenStream.getVideoTracks()[0];
@@ -92,14 +87,12 @@ async function startScreenShare() {
   document.getElementById("screenVideo").srcObject = screenStream;
 }
 
-// MICROPHONE
 function toggleMic() {
   if (!localStream) return;
   localStream.getAudioTracks()[0].enabled = isMuted;
   isMuted = !isMuted;
 }
 
-// CHAT
 function sendMessage() {
   const input = document.getElementById("chatInput");
   if (!input.value) return;
@@ -108,22 +101,20 @@ function sendMessage() {
 }
 
 socket.on("chat-message", data => {
-  const chatBox = document.getElementById("chat");
-  if (!chatBox) return;
-  chatBox.innerHTML += `<div><b>${data.username}:</b> ${data.message}</div>`;
-  chatBox.scrollTop = chatBox.scrollHeight;
+  const chat = document.getElementById("chat");
+  if (!chat) return;
+  chat.innerHTML += `<div><b>${data.username}:</b> ${data.message}</div>`;
+  chat.scrollTop = chat.scrollHeight;
 });
 
-// USERS
 socket.on("user-list", users => {
   const div = document.getElementById("users");
   div.innerHTML = Object.values(users).map(u => `<div>${u}</div>`).join("");
 });
 
-// INVITE + LEAVE
 function copyInvite() {
   navigator.clipboard.writeText(window.location.origin + "?room=" + roomId);
-  alert("Copied!");
+  alert("Invite link copied!");
 }
 
 function leaveRoom() {
