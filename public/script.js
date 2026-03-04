@@ -12,6 +12,7 @@ let remoteScreen = null;
 let currentQuality = 'auto';
 let bandwidthInterval = null;
 let lastBitrate = 0;
+let videoPlayAttempted = false;
 
 // More STUN servers for better connection
 const configuration = {
@@ -50,6 +51,13 @@ function login() {
         
         // Get screen video element
         remoteScreen = document.getElementById('remote-screen');
+        
+        // Add click handler for video playback
+        document.body.addEventListener('click', function playVideoOnClick() {
+            if (remoteScreen && remoteScreen.paused && remoteScreen.srcObject) {
+                remoteScreen.play().catch(e => console.log('Play on click error:', e));
+            }
+        }, { once: false });
     }
 }
 
@@ -450,6 +458,10 @@ function startBandwidthMonitoring() {
 // Close fullscreen view
 function closeScreenView() {
     document.getElementById('screen-container').classList.remove('active');
+    if (remoteScreen) {
+        remoteScreen.pause();
+        remoteScreen.srcObject = null;
+    }
 }
 
 // Update status display
@@ -495,14 +507,88 @@ function createPeerConnection(peerId) {
         console.log(`📥 Received ${event.track.kind} track`);
         
         if (event.track.kind === 'audio') {
+            // Handle audio
             remoteAudio.srcObject = event.streams[0];
             remoteAudio.volume = 1.0;
-            remoteAudio.play()
-                .then(() => console.log('✅ Audio playing'))
-                .catch(e => console.log('Audio play error:', e));
+            
+            // Play audio with user interaction fallback
+            const playAudio = () => {
+                remoteAudio.play()
+                    .then(() => console.log('✅ Audio playing'))
+                    .catch(e => {
+                        console.log('Audio play error:', e);
+                        // Try again on user interaction
+                        document.body.addEventListener('click', function playAudioOnClick() {
+                            remoteAudio.play().catch(console.log);
+                            document.body.removeEventListener('click', playAudioOnClick);
+                        }, { once: true });
+                    });
+            };
+            
+            playAudio();
+            
         } else if (event.track.kind === 'video') {
+            // Handle video
             remoteScreen.srcObject = event.streams[0];
             document.getElementById('screen-container').classList.add('active');
+            
+            // Show quality info
+            const settings = event.track.getSettings();
+            const fps = settings.frameRate || 30;
+            const height = settings.height || 1080;
+            const quality = height >= 1080 ? '1080p' : height >= 720 ? '720p' : '480p';
+            document.getElementById('quality-indicator').innerHTML = `📺 ${quality} ${fps}fps`;
+            document.getElementById('quality-indicator').classList.add('visible');
+            
+            // Create a button for manual play if needed
+            const playButton = document.createElement('button');
+            playButton.textContent = 'Click to Play Video';
+            playButton.style.cssText = `
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                padding: 15px 30px;
+                background: #5865f2;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 16px;
+                cursor: pointer;
+                z-index: 2100;
+            `;
+            
+            // Try to play video
+            const playVideo = () => {
+                remoteScreen.play()
+                    .then(() => {
+                        console.log('✅ Video playing');
+                        if (playButton.parentNode) {
+                            playButton.remove();
+                        }
+                    })
+                    .catch(e => {
+                        console.log('Video play error:', e);
+                        // Show play button if autoplay fails
+                        if (!document.getElementById('manual-play-btn')) {
+                            playButton.id = 'manual-play-btn';
+                            document.getElementById('screen-container').appendChild(playButton);
+                            playButton.onclick = () => {
+                                remoteScreen.play();
+                                playButton.remove();
+                            };
+                        }
+                    });
+            };
+            
+            // Try to play immediately
+            playVideo();
+            
+            // Also try when track becomes active
+            event.track.onunmute = () => {
+                console.log('Video track unmuted, trying to play');
+                playVideo();
+            };
         }
     };
     
@@ -531,6 +617,11 @@ function createPeerConnection(peerId) {
     // Monitor ICE connection
     pc.oniceconnectionstatechange = () => {
         console.log('❄️ ICE state:', pc.iceConnectionState);
+    };
+    
+    // Handle negotiation needed
+    pc.onnegotiationneeded = async () => {
+        console.log('🤝 Negotiation needed');
     };
     
     peerConnection = pc;
