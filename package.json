@@ -1,7 +1,10 @@
+
+
+
 {
   "name": "discord-clone",
   "version": "1.0.0",
-  "description": "60fps screen sharing with manual quality control",
+  "description": "Optimized audio chat and 1080p screen sharing",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
