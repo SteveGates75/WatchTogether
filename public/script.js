@@ -23,7 +23,7 @@ async function joinRoom() {
 }
 
 socket.on("existing-users", users => users.forEach(id => createPeer(id, true)));
-socket.on("user-joined", id => createPeer(id, false));
+socket.on("user-joined", ({ id, username }) => createPeer(id, false));
 
 socket.on("signal", async ({ from, data }) => {
   const peer = peers[from];
@@ -35,6 +35,7 @@ socket.on("signal", async ({ from, data }) => {
     await peer.setLocalDescription(answer);
     socket.emit("signal", { to: from, data: answer });
   }
+
   if (data.type === "answer") await peer.setRemoteDescription(new RTCSessionDescription(data));
   if (data.candidate) await peer.addIceCandidate(new RTCIceCandidate(data));
 });
@@ -43,8 +44,10 @@ function createPeer(id, initiator) {
   const peer = new RTCPeerConnection(config);
   peers[id] = peer;
 
+  // Add local audio
   localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
 
+  // Handle remote tracks (screen + audio)
   peer.ontrack = e => {
     e.streams.forEach(stream => {
       if (stream.getVideoTracks().length > 0) document.getElementById("screenVideo").srcObject = stream;
@@ -70,12 +73,9 @@ function createPeer(id, initiator) {
   }
 }
 
+// Screen share
 async function startScreenShare() {
-  screenStream = await navigator.mediaDevices.getDisplayMedia({
-    video: { width: { ideal: 1920 }, height: { ideal: 1080 } },
-    audio: true
-  });
-
+  screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { width: 1920, height: 1080 }, audio: true });
   const videoTrack = screenStream.getVideoTracks()[0];
 
   Object.values(peers).forEach(peer => {
@@ -109,12 +109,12 @@ socket.on("chat-message", data => {
 
 socket.on("user-list", users => {
   const div = document.getElementById("users");
-  div.innerHTML = Object.values(users).map(u => `<div>${u}</div>`).join("");
+  div.innerHTML = users.map(u => `<div>${u}</div>`).join("");
 });
 
 function copyInvite() {
   navigator.clipboard.writeText(window.location.origin + "?room=" + roomId);
-  alert("Invite link copied!");
+  alert("Invite copied!");
 }
 
 function leaveRoom() {

@@ -6,7 +6,6 @@ const { v4: uuidv4 } = require("uuid");
 
 app.use(express.static("public"));
 
-// Rooms storage
 const rooms = {};
 
 io.on("connection", socket => {
@@ -18,19 +17,15 @@ io.on("connection", socket => {
     socket.roomId = roomId;
 
     if (!rooms[roomId]) rooms[roomId] = {};
-    rooms[roomId][socket.id] = username;
+    rooms[roomId][socket.id] = { username };
 
     // Send existing users to new user
-    socket.emit(
-      "existing-users",
-      Object.keys(rooms[roomId]).filter(id => id !== socket.id)
-    );
+    socket.emit("existing-users", Object.keys(rooms[roomId]).filter(id => id !== socket.id));
 
     // Notify others
-    socket.to(roomId).emit("user-joined", socket.id, username);
+    socket.to(roomId).emit("user-joined", { id: socket.id, username });
 
-    // Update user list
-    io.to(roomId).emit("user-list", rooms[roomId]);
+    io.to(roomId).emit("user-list", getUsernames(roomId));
   });
 
   // WebRTC signaling
@@ -40,13 +35,9 @@ io.on("connection", socket => {
 
   // Chat messages
   socket.on("chat-message", msg => {
-    io.to(socket.roomId).emit("chat-message", {
-      username: socket.username,
-      message: msg
-    });
+    io.to(socket.roomId).emit("chat-message", { username: socket.username, message: msg });
   });
 
-  // Disconnect
   socket.on("disconnect", () => {
     const roomId = socket.roomId;
     if (!roomId || !rooms[roomId]) return;
@@ -54,11 +45,15 @@ io.on("connection", socket => {
     delete rooms[roomId][socket.id];
 
     socket.to(roomId).emit("user-left", socket.id);
-    io.to(roomId).emit("user-list", rooms[roomId]);
+    io.to(roomId).emit("user-list", getUsernames(roomId));
 
     if (Object.keys(rooms[roomId]).length === 0) delete rooms[roomId];
   });
 });
+
+function getUsernames(roomId) {
+  return Object.values(rooms[roomId] || {}).map(u => u.username);
+}
 
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => console.log("Server running on port " + PORT));
