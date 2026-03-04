@@ -92,7 +92,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Handle disconnection
+  // Handle disconnection - UPDATED VERSION WITH PEER LEFT NOTIFICATION
   socket.on('disconnect', () => {
     const user = users[socket.id];
     if (user) {
@@ -101,9 +101,15 @@ io.on('connection', (socket) => {
         message: `${user.username} left the chat`
       });
       
-      // Remove from rooms
+      // Remove from rooms and notify others in video rooms
       Object.keys(rooms).forEach(roomId => {
-        rooms[roomId].users = rooms[roomId].users.filter(u => u.id !== socket.id);
+        const roomUsers = rooms[roomId].users;
+        const userIndex = roomUsers.findIndex(u => u.id === socket.id);
+        if (userIndex !== -1) {
+          roomUsers.splice(userIndex, 1);
+          // Notify others that this peer left
+          socket.to(roomId).emit('peer-left', socket.id);
+        }
       });
       
       delete users[socket.id];
