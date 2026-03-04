@@ -16,9 +16,9 @@ const io = socketIo(server, {
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Store connected users and rooms
+// Store connected users
 const users = {};
-const rooms = {};
+let audioRoomUsers = [];
 
 io.on('connection', (socket) => {
   console.log('New user connected:', socket.id);
@@ -27,23 +27,20 @@ io.on('connection', (socket) => {
   socket.on('join', (username) => {
     users[socket.id] = {
       id: socket.id,
-      username: username,
-      room: 'general'
+      username: username
     };
     
-    socket.join('general');
-    io.to('general').emit('user-joined', {
+    io.emit('user-joined', {
       user: users[socket.id],
       message: `${username} joined the chat`
     });
-    io.to('general').emit('update-users', Object.values(users).filter(u => u.room === 'general'));
   });
 
   // Handle text messages
   socket.on('send-message', (data) => {
     const user = users[socket.id];
     if (user) {
-      io.to(user.room).emit('new-message', {
+      io.emit('new-message', {
         user: user.username,
         message: data.message,
         time: new Date().toLocaleTimeString()
@@ -51,35 +48,31 @@ io.on('connection', (socket) => {
     }
   });
 
-  // WebRTC Signaling for voice/video
-  socket.on('join-room', (roomId) => {
-    const user = users[socket.id];
-    if (!user) return;
-    
+  // Audio call rooms
+  socket.on('join-audio-room', (roomId) => {
     socket.join(roomId);
-    rooms[roomId] = rooms[roomId] || { users: [] };
-    rooms[roomId].users.push({ id: socket.id, username: user.username });
+    audioRoomUsers.push(socket.id);
     
     // Notify others in the room
-    socket.to(roomId).emit('user-connected', {
-      id: socket.id,
-      username: user.username
-    });
-    
-    // Send existing users to the new joiner
-    const existingUsers = rooms[roomId].users.filter(u => u.id !== socket.id);
-    socket.emit('existing-users', existingUsers);
+    socket.to(roomId).emit('user-joined-audio', socket.id);
   });
 
-  socket.on('offer', (data) => {
-    socket.to(data.target).emit('offer', {
+  socket.on('leave-audio-room', (roomId) => {
+    socket.leave(roomId);
+    audioRoomUsers = audioRoomUsers.filter(id => id !== socket.id);
+    socket.to(roomId).emit('user-left-audio', socket.id);
+  });
+
+  // Audio signaling
+  socket.on('audio-offer', (data) => {
+    socket.to(data.target).emit('audio-offer', {
       offer: data.offer,
       sender: socket.id
     });
   });
 
-  socket.on('answer', (data) => {
-    socket.to(data.target).emit('answer', {
+  socket.on('audio-answer', (data) => {
+    socket.to(data.target).emit('audio-answer', {
       answer: data.answer,
       sender: socket.id
     });
@@ -92,29 +85,24 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Handle disconnection - UPDATED VERSION WITH PEER LEFT NOTIFICATION
+  // Handle disconnection
   socket.on('disconnect', () => {
     const user = users[socket.id];
     if (user) {
-      io.to(user.room).emit('user-left', {
+      io.emit('user-left', {
         user: user,
         message: `${user.username} left the chat`
       });
       
-      // Remove from rooms and notify others in video rooms
-      Object.keys(rooms).forEach(roomId => {
-        const roomUsers = rooms[roomId].users;
-        const userIndex = roomUsers.findIndex(u => u.id === socket.id);
-        if (userIndex !== -1) {
-          roomUsers.splice(userIndex, 1);
-          // Notify others that this peer left
-          socket.to(roomId).emit('peer-left', socket.id);
-        }
-      });
-      
       delete users[socket.id];
-      io.to('general').emit('update-users', Object.values(users).filter(u => u.room === 'general'));
     }
+    
+    // Remove from audio room
+    if (audioRoomUsers.includes(socket.id)) {
+      audioRoomUsers = audioRoomUsers.filter(id => id !== socket.id);
+      io.to('audio-room-1').emit('user-left-audio', socket.id);
+    }
+    
     console.log('User disconnected:', socket.id);
   });
 });
