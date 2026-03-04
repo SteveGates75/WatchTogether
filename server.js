@@ -1,68 +1,119 @@
-const express = require("express");
+const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+const path = require('path');
+const cors = require('cors');
+
 const app = express();
-const http = require("http").createServer(app);
-const io = require("socket.io")(http);
+const server = http.createServer(app);
+const io = socketIo(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
 
-app.use(express.static("public"));
+app.use(cors());
+app.use(express.static(path.join(__dirname, 'public')));
 
-const rooms = {}; // roomId -> { users: { socketId: username }, screenSharer: socketId }
+// Store connected users and rooms
+const users = {};
+const rooms = {};
 
-io.on("connection", socket => {
+io.on('connection', (socket) => {
+  console.log('New user connected:', socket.id);
 
-  socket.on("join-room", ({ roomId, username }) => {
+  // Handle user joining with username
+  socket.on('join', (username) => {
+    users[socket.id] = {
+      id: socket.id,
+      username: username,
+      room: 'general'
+    };
+    
+    socket.join('general');
+    io.to('general').emit('user-joined', {
+      user: users[socket.id],
+      message: `${username} joined the chat`
+    });
+    io.to('general').emit('update-users', Object.values(users).filter(u => u.room === 'general'));
+  });
+
+  // Handle text messages
+  socket.on('send-message', (data) => {
+    const user = users[socket.id];
+    if (user) {
+      io.to(user.room).emit('new-message', {
+        user: user.username,
+        message: data.message,
+        time: new Date().toLocaleTimeString()
+      });
+    }
+  });
+
+  // WebRTC Signaling for voice/video
+  socket.on('join-room', (roomId) => {
+    const user = users[socket.id];
+    if (!user) return;
+    
     socket.join(roomId);
-    socket.roomId = roomId;
-    socket.username = username;
-
-    if (!rooms[roomId]) rooms[roomId] = { users: {}, screenSharer: null };
-    rooms[roomId].users[socket.id] = username;
-
-    // send existing users to new user
-    socket.emit("existing-users", Object.keys(rooms[roomId].users).filter(id => id !== socket.id));
-
-    // notify others
-    socket.to(roomId).emit("user-joined", socket.id, username);
-
-    // send screen info if active
-    if (rooms[roomId].screenSharer) socket.emit("screen-started", rooms[roomId].screenSharer);
-
-    io.to(roomId).emit("user-list", rooms[roomId].users);
-
-    // handle WebRTC signals
-    socket.on("signal", ({ to, data }) => {
-      io.to(to).emit("signal", { from: socket.id, data });
+    rooms[roomId] = rooms[roomId] || { users: [] };
+    rooms[roomId].users.push({ id: socket.id, username: user.username });
+    
+    // Notify others in the room
+    socket.to(roomId).emit('user-connected', {
+      id: socket.id,
+      username: user.username
     });
+    
+    // Send existing users to the new joiner
+    const existingUsers = rooms[roomId].users.filter(u => u.id !== socket.id);
+    socket.emit('existing-users', existingUsers);
+  });
 
-    // handle chat
-    socket.on("chat-message", msg => {
-      io.to(roomId).emit("chat-message", { username: socket.username, message: msg });
-    });
-
-    // screen share
-    socket.on("start-screen", () => {
-      rooms[roomId].screenSharer = socket.id;
-      io.to(roomId).emit("screen-started", socket.id);
-    });
-
-    socket.on("stop-screen", () => {
-      if (rooms[roomId].screenSharer === socket.id) {
-        rooms[roomId].screenSharer = null;
-        io.to(roomId).emit("screen-stopped");
-      }
-    });
-
-    socket.on("disconnect", () => {
-      delete rooms[roomId]?.users[socket.id];
-      if (rooms[roomId]?.screenSharer === socket.id) {
-        rooms[roomId].screenSharer = null;
-        io.to(roomId).emit("screen-stopped");
-      }
-      io.to(roomId).emit("user-list", rooms[roomId]?.users);
-      if (Object.keys(rooms[roomId]?.users || {}).length === 0) delete rooms[roomId];
+  socket.on('offer', (data) => {
+    socket.to(data.target).emit('offer', {
+      offer: data.offer,
+      sender: socket.id
     });
   });
 
+  socket.on('answer', (data) => {
+    socket.to(data.target).emit('answer', {
+      answer: data.answer,
+      sender: socket.id
+    });
+  });
+
+  socket.on('ice-candidate', (data) => {
+    socket.to(data.target).emit('ice-candidate', {
+      candidate: data.candidate,
+      sender: socket.id
+    });
+  });
+
+  // Handle disconnection
+  socket.on('disconnect', () => {
+    const user = users[socket.id];
+    if (user) {
+      io.to(user.room).emit('user-left', {
+        user: user,
+        message: `${user.username} left the chat`
+      });
+      
+      // Remove from rooms
+      Object.keys(rooms).forEach(roomId => {
+        rooms[roomId].users = rooms[roomId].users.filter(u => u.id !== socket.id);
+      });
+      
+      delete users[socket.id];
+      io.to('general').emit('update-users', Object.values(users).filter(u => u.room === 'general'));
+    }
+    console.log('User disconnected:', socket.id);
+  });
 });
 
 const PORT = process.env.PORT || 3000;
-http.listen(PORT, () => console.log("Server running on port " + PORT));
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
