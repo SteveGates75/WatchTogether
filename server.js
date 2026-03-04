@@ -26,19 +26,13 @@ io.on("connection", socket => {
     socket.to(roomId).emit("user-joined", socket.id, username);
 
     // if screen is active, notify new user
-    if (rooms[roomId].screenSharer) {
-      socket.emit("screen-started", rooms[roomId].screenSharer);
-    }
+    if (rooms[roomId].screenSharer) socket.emit("screen-started", rooms[roomId].screenSharer);
 
     io.to(roomId).emit("user-list", rooms[roomId].users);
 
-    socket.on("signal", ({ to, data }) => {
-      io.to(to).emit("signal", { from: socket.id, data });
-    });
+    socket.on("signal", ({ to, data }) => { io.to(to).emit("signal", { from: socket.id, data }); });
 
-    socket.on("chat-message", msg => {
-      io.to(roomId).emit("chat-message", { username: socket.username, message: msg });
-    });
+    socket.on("chat-message", msg => { io.to(roomId).emit("chat-message", { username: socket.username, message: msg }); });
 
     socket.on("start-screen", () => {
       rooms[roomId].screenSharer = socket.id;
@@ -62,9 +56,7 @@ io.on("connection", socket => {
 
       io.to(roomId).emit("user-list", rooms[roomId]?.users);
 
-      if (Object.keys(rooms[roomId]?.users || {}).length === 0) {
-        delete rooms[roomId];
-      }
+      if (Object.keys(rooms[roomId]?.users || {}).length === 0) delete rooms[roomId];
     });
 
   });

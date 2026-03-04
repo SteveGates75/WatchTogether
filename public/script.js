@@ -22,8 +22,8 @@ async function joinRoom() {
   document.getElementById("roomLabel").innerText = "Room: " + roomId;
 }
 
-socket.on("existing-users", users => { users.forEach(id => createPeer(id, true)); });
-socket.on("user-joined", id => { createPeer(id, false); });
+socket.on("existing-users", users => users.forEach(id => createPeer(id, true)));
+socket.on("user-joined", id => createPeer(id, false));
 
 socket.on("signal", async ({ from, data }) => {
   const peer = peers[from];
@@ -34,9 +34,7 @@ socket.on("signal", async ({ from, data }) => {
     await peer.setLocalDescription(answer);
     socket.emit("signal", { to: from, data: answer });
   }
-  if (data.type === "answer") {
-    await peer.setRemoteDescription(new RTCSessionDescription(data));
-  }
+  if (data.type === "answer") await peer.setRemoteDescription(new RTCSessionDescription(data));
   if (data.candidate) await peer.addIceCandidate(new RTCIceCandidate(data));
 });
 
@@ -95,9 +93,7 @@ socket.on("user-list", users => {
   div.innerHTML = Object.values(users).map(u => `<div>${u}</div>`).join("");
 });
 
-socket.on("screen-started", sharerId => {
-  console.log("Screen sharing started by", sharerId);
-});
+socket.on("screen-started", sharerId => {});
 socket.on("screen-stopped", () => { document.getElementById("screenVideo").srcObject = null; });
 
 function copyInvite() {
