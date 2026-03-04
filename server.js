@@ -6,54 +6,70 @@ const { v4: uuidv4 } = require("uuid");
 
 app.use(express.static("public"));
 
-const rooms = {};
+const rooms = {}; // roomId => { users: {socketId: username}, screenSharer: socketId }
 
 io.on("connection", socket => {
-  console.log("User connected:", socket.id);
 
   socket.on("join-room", ({ roomId, username }) => {
     socket.join(roomId);
-    socket.username = username;
     socket.roomId = roomId;
+    socket.username = username;
 
-    if (!rooms[roomId]) rooms[roomId] = {};
-    rooms[roomId][socket.id] = { username };
+    if (!rooms[roomId]) rooms[roomId] = { users: {}, screenSharer: null };
 
-    // Send existing users to new user
-    socket.emit("existing-users", Object.keys(rooms[roomId]).filter(id => id !== socket.id));
+    rooms[roomId].users[socket.id] = username;
 
-    // Notify others
-    socket.to(roomId).emit("user-joined", { id: socket.id, username });
+    // send existing users to new user
+    socket.emit("existing-users", Object.keys(rooms[roomId].users).filter(id => id !== socket.id));
 
-    io.to(roomId).emit("user-list", getUsernames(roomId));
+    // notify others
+    socket.to(roomId).emit("user-joined", socket.id, username);
+
+    // if screen is active, notify new user
+    if (rooms[roomId].screenSharer) {
+      socket.emit("screen-started", rooms[roomId].screenSharer);
+    }
+
+    io.to(roomId).emit("user-list", rooms[roomId].users);
+
+    socket.on("signal", ({ to, data }) => {
+      io.to(to).emit("signal", { from: socket.id, data });
+    });
+
+    socket.on("chat-message", msg => {
+      io.to(roomId).emit("chat-message", { username: socket.username, message: msg });
+    });
+
+    socket.on("start-screen", () => {
+      rooms[roomId].screenSharer = socket.id;
+      io.to(roomId).emit("screen-started", socket.id);
+    });
+
+    socket.on("stop-screen", () => {
+      if (rooms[roomId].screenSharer === socket.id) {
+        rooms[roomId].screenSharer = null;
+        io.to(roomId).emit("screen-stopped");
+      }
+    });
+
+    socket.on("disconnect", () => {
+      delete rooms[roomId]?.users[socket.id];
+
+      if (rooms[roomId]?.screenSharer === socket.id) {
+        rooms[roomId].screenSharer = null;
+        io.to(roomId).emit("screen-stopped");
+      }
+
+      io.to(roomId).emit("user-list", rooms[roomId]?.users);
+
+      if (Object.keys(rooms[roomId]?.users || {}).length === 0) {
+        delete rooms[roomId];
+      }
+    });
+
   });
 
-  // WebRTC signaling
-  socket.on("signal", ({ to, data }) => {
-    io.to(to).emit("signal", { from: socket.id, data });
-  });
-
-  // Chat messages
-  socket.on("chat-message", msg => {
-    io.to(socket.roomId).emit("chat-message", { username: socket.username, message: msg });
-  });
-
-  socket.on("disconnect", () => {
-    const roomId = socket.roomId;
-    if (!roomId || !rooms[roomId]) return;
-
-    delete rooms[roomId][socket.id];
-
-    socket.to(roomId).emit("user-left", socket.id);
-    io.to(roomId).emit("user-list", getUsernames(roomId));
-
-    if (Object.keys(rooms[roomId]).length === 0) delete rooms[roomId];
-  });
 });
 
-function getUsernames(roomId) {
-  return Object.values(rooms[roomId] || {}).map(u => u.username);
-}
-
 const PORT = process.env.PORT || 3000;
-http.listen(PORT, () => console.log("Server running on port " + PORT));
+http.listen(PORT, () => console.log(`Server running on port ${PORT}`));
