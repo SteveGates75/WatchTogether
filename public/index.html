@@ -49,6 +49,10 @@
             font-size: 16px;
         }
 
+        #login-container input:focus {
+            outline: 2px solid #5865f2;
+        }
+
         #login-container button {
             padding: 1rem 1.5rem;
             background: #5865f2;
@@ -59,11 +63,17 @@
             font-size: 16px;
             width: 100%;
             font-weight: bold;
+            transition: background 0.3s;
+        }
+
+        #login-container button:hover {
+            background: #4752c4;
         }
 
         #app-container {
             display: flex;
             height: 100vh;
+            display: none;
         }
 
         .sidebar {
@@ -86,6 +96,7 @@
             font-size: 24px;
             cursor: pointer;
             transition: all 0.3s;
+            position: relative;
         }
 
         .sidebar button.active {
@@ -98,6 +109,25 @@
 
         .sidebar button:hover {
             transform: scale(1.05);
+        }
+
+        .sidebar button::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            left: 60px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: #2a2a2a;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            white-space: nowrap;
+            display: none;
+            z-index: 100;
+        }
+
+        .sidebar button:hover::after {
+            display: block;
         }
 
         .main-content {
@@ -127,6 +157,12 @@
             padding: 0.75rem;
             background: #2a2a2a;
             border-radius: 8px;
+            animation: fadeIn 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
         .message strong {
@@ -138,6 +174,12 @@
             color: #888;
             font-size: 0.75rem;
             margin-left: 0.5rem;
+        }
+
+        .message.system {
+            background: #2a2a2a;
+            color: #888;
+            font-style: italic;
         }
 
         .message-input {
@@ -155,6 +197,10 @@
             font-size: 16px;
         }
 
+        .message-input input:focus {
+            outline: 2px solid #5865f2;
+        }
+
         .message-input button {
             padding: 1rem 1.5rem;
             background: #5865f2;
@@ -163,6 +209,11 @@
             border-radius: 8px;
             cursor: pointer;
             font-weight: bold;
+            transition: background 0.3s;
+        }
+
+        .message-input button:hover {
+            background: #4752c4;
         }
 
         #status-container {
@@ -180,19 +231,44 @@
             border-radius: 20px;
             font-size: 12px;
             display: none;
+            align-items: center;
+            gap: 5px;
         }
 
         .status-badge.active {
-            display: block;
+            display: flex;
         }
 
-        #call-status.connecting { background: #faa81a; }
-        #call-status.connected { background: #3ba55d; }
-        #call-status.screen-sharing { background: #5865f2; }
+        .status-badge.connecting { 
+            background: #faa81a;
+            color: black;
+        }
+        
+        .status-badge.connected { 
+            background: #3ba55d;
+        }
+        
+        .status-badge.error { 
+            background: #ed4245;
+        }
+
+        .status-badge::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
 
         #bitrate-status {
             background: #2a2a2a;
-            color: #fff;
         }
 
         #screen-container {
@@ -241,6 +317,10 @@
             font-weight: bold;
         }
 
+        .screen-controls button:hover {
+            background: #c13b3e;
+        }
+
         .quality-indicator {
             position: absolute;
             top: 20px;
@@ -251,6 +331,7 @@
             border-radius: 20px;
             font-size: 14px;
             display: none;
+            backdrop-filter: blur(5px);
         }
 
         .quality-indicator.visible {
@@ -267,6 +348,10 @@
                 height: 40px;
                 font-size: 20px;
             }
+
+            .sidebar button::after {
+                left: 45px;
+            }
         }
     </style>
 </head>
@@ -277,10 +362,10 @@
         <button onclick="login()">Join Chat</button>
     </div>
 
-    <div id="app-container" style="display: none;">
+    <div id="app-container">
         <div class="sidebar">
-            <button id="callBtn" onclick="toggleCall()" title="Audio Call">🎧</button>
-            <button id="screenBtn" onclick="toggleScreenShare()" title="Share Screen">📺</button>
+            <button id="callBtn" onclick="toggleCall()" data-tooltip="Audio Call">🎧</button>
+            <button id="screenBtn" onclick="toggleScreenShare()" data-tooltip="Share Screen">📺</button>
         </div>
         
         <div class="main-content">
@@ -296,7 +381,8 @@
 
     <div id="status-container">
         <div id="call-status" class="status-badge"></div>
-        <div id="bitrate-status" class="status-badge"></div>
+        <div id="screen-status" class="status-badge"></div>
+        <div id="bitrate-status" class="status-badge">📊 0 Kbps</div>
     </div>
 
     <div id="screen-container">

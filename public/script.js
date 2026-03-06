@@ -1,16 +1,16 @@
-const socket = io();
-let currentUser = '';
-let localStream = null;
-let screenStream = null;
-let peerConnection = null;
+// public/script.js
+const socket = io({
+    transports: ['websocket', 'polling']
+});
+
+let username = '';
+let localStream;
+let peerConnection;
+let screenPeerConnection;
+let currentRoom = 'main-room';
 let isCallActive = false;
 let isScreenSharing = false;
-let callButton = null;
-let screenButton = null;
-let remoteAudio = null;
-let remoteScreen = null;
 
-// Better STUN servers for faster connection
 const configuration = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -18,491 +18,420 @@ const configuration = {
         { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun3.l.google.com:19302' },
         { urls: 'stun:stun4.l.google.com:19302' }
-    ],
-    iceCandidatePoolSize: 10
+    ]
 };
 
+// Login function
 function login() {
-    const username = document.getElementById('username-input').value.trim();
-    if (username) {
-        currentUser = username;
-        socket.emit('join', username);
-        document.getElementById('login-container').style.display = 'none';
-        document.getElementById('app-container').style.display = 'flex';
-        
-        // Get button references
-        callButton = document.getElementById('callBtn');
-        screenButton = document.getElementById('screenBtn');
-        
-        // Create hidden audio element with optimized settings
-        remoteAudio = new Audio();
-        remoteAudio.autoplay = true;
-        remoteAudio.controls = false;
-        remoteAudio.style.display = 'none';
-        document.body.appendChild(remoteAudio);
-        
-        // Get screen video element
-        remoteScreen = document.getElementById('remote-screen');
+    username = document.getElementById('username-input').value.trim();
+    
+    if (!username) {
+        alert('Please enter your name');
+        return;
     }
+    
+    document.getElementById('login-container').style.display = 'none';
+    document.getElementById('app-container').style.display = 'flex';
+    
+    socket.emit('join', username);
+    socket.emit('join-room', currentRoom);
+    
+    initializeChat();
+    setupAudio();
+    
+    addSystemMessage(`You joined as ${username}`);
 }
 
-// Text chat
-socket.on('new-message', (data) => {
-    const messagesDiv = document.getElementById('messages');
-    const messageEl = document.createElement('div');
-    messageEl.className = 'message';
-    messageEl.innerHTML = `<strong>${data.user}</strong> ${data.message} <small>${data.time}</small>`;
-    messagesDiv.appendChild(messageEl);
-    messagesDiv.scrollTop = messagesDiv.scrollHeight;
-});
-
-socket.on('user-joined', (data) => {
-    const messagesDiv = document.getElementById('messages');
-    const messageEl = document.createElement('div');
-    messageEl.className = 'message';
-    messageEl.innerHTML = `<em>${data.message}</em>`;
-    messagesDiv.appendChild(messageEl);
-});
-
-socket.on('user-left', (data) => {
-    const messagesDiv = document.getElementById('messages');
-    const messageEl = document.createElement('div');
-    messageEl.className = 'message';
-    messageEl.innerHTML = `<em>${data.message}</em>`;
-    messagesDiv.appendChild(messageEl);
+// Initialize chat
+function initializeChat() {
+    const messageInput = document.getElementById('message-input');
     
-    if (isCallActive || isScreenSharing) {
-        endCall();
-        stopScreenShare();
-    }
-});
+    messageInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            sendMessage();
+        }
+    });
+}
 
+// Send message
 function sendMessage() {
     const input = document.getElementById('message-input');
     const message = input.value.trim();
+    
     if (message) {
         socket.emit('send-message', { message });
         input.value = '';
     }
 }
 
-document.getElementById('message-input').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        sendMessage();
-    }
-});
-
-// Toggle audio call
-async function toggleCall() {
-    if (isCallActive) {
-        endCall();
-    } else {
-        await startAudioCall();
-    }
-}
-
-// OPTIMIZED: Start audio call with better quality
-async function startAudioCall() {
+// Setup audio
+async function setupAudio() {
     try {
-        console.log('🎤 Starting audio call...');
-        
-        updateStatus('Requesting microphone...', 'connecting');
-        
         localStream = await navigator.mediaDevices.getUserMedia({ 
             audio: {
                 echoCancellation: true,
                 noiseSuppression: true,
-                autoGainControl: true,
-                sampleRate: 48000,
-                channelCount: 2,
-                volume: 1.0
+                autoGainControl: true
             }
         });
-        
-        // Optimize audio settings
-        const audioTrack = localStream.getAudioTracks()[0];
-        if (audioTrack) {
-            const constraints = audioTrack.getConstraints();
-            await audioTrack.applyConstraints({
-                volume: 1.0,
-                sampleRate: 48000,
-                sampleSize: 16,
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true
-            });
-        }
-        
         console.log('✅ Microphone access granted');
-        
-        callButton.classList.add('active');
-        callButton.textContent = '🔴';
-        callButton.title = 'End Call';
-        
-        updateStatus('Connecting...', 'connecting');
-        
-        socket.emit('join-room', 'main-room');
-        isCallActive = true;
-        
+        updateStatus('call-status', '🎤 Mic ready', 'connected');
     } catch (err) {
         console.error('❌ Microphone error:', err);
-        alert('Could not access microphone: ' + err.message);
-        updateStatus('', '');
+        updateStatus('call-status', '❌ Mic blocked', 'error');
+        
+        if (err.name === 'NotAllowedError') {
+            alert('Please allow microphone access to use audio calls');
+        } else if (err.name === 'NotFoundError') {
+            alert('No microphone found. Please connect a microphone.');
+        }
     }
 }
 
-// End audio call
-function endCall() {
-    console.log('🔴 Ending call...');
+// Toggle audio call
+async function toggleCall() {
+    const callBtn = document.getElementById('callBtn');
     
-    if (localStream) {
-        localStream.getTracks().forEach(track => track.stop());
-        localStream = null;
+    if (!localStream) {
+        alert('Microphone not available. Please check permissions.');
+        return;
     }
     
-    if (peerConnection) {
-        peerConnection.close();
-        peerConnection = null;
+    if (isCallActive) {
+        // End call
+        if (peerConnection) {
+            peerConnection.close();
+            peerConnection = null;
+        }
+        isCallActive = false;
+        callBtn.classList.remove('active');
+        updateStatus('call-status', 'Call ended', '');
+        addSystemMessage('Call ended');
+    } else {
+        // Start call
+        try {
+            callBtn.classList.add('active');
+            updateStatus('call-status', 'Connecting...', 'connecting');
+            
+            await createPeerConnection();
+            
+            isCallActive = true;
+            addSystemMessage('Call started...');
+        } catch (err) {
+            console.error('Call error:', err);
+            updateStatus('call-status', 'Call failed', 'error');
+            callBtn.classList.remove('active');
+        }
     }
+}
+
+// Create peer connection for audio
+async function createPeerConnection() {
+    peerConnection = new RTCPeerConnection(configuration);
     
-    if (remoteAudio) {
-        remoteAudio.srcObject = null;
+    // Add local audio tracks
+    localStream.getTracks().forEach(track => {
+        peerConnection.addTrack(track, localStream);
+    });
+    
+    // Handle incoming audio
+    peerConnection.ontrack = (event) => {
+        const remoteAudio = new Audio();
+        remoteAudio.srcObject = event.streams[0];
+        remoteAudio.autoplay = true;
+        remoteAudio.volume = 1.0;
+        
+        updateStatus('call-status', 'Connected', 'connected');
+        addSystemMessage('🔊 Connected to remote audio');
+    };
+    
+    // Handle ICE candidates
+    peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+            socket.emit('ice-candidate', {
+                candidate: event.candidate,
+                target: currentRoom
+            });
+        }
+    };
+    
+    // Handle connection state
+    peerConnection.onconnectionstatechange = () => {
+        console.log('Connection state:', peerConnection.connectionState);
+        
+        if (peerConnection.connectionState === 'disconnected' || 
+            peerConnection.connectionState === 'failed' ||
+            peerConnection.connectionState === 'closed') {
+            
+            isCallActive = false;
+            document.getElementById('callBtn').classList.remove('active');
+            updateStatus('call-status', 'Disconnected', 'error');
+            addSystemMessage('Call disconnected');
+        }
+    };
+    
+    // Create and send offer
+    try {
+        const offer = await peerConnection.createOffer({
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: false
+        });
+        
+        await peerConnection.setLocalDescription(offer);
+        
+        socket.emit('offer', {
+            offer: offer,
+            target: currentRoom
+        });
+        
+        console.log('📞 Offer sent');
+    } catch (err) {
+        console.error('Error creating offer:', err);
+        throw err;
     }
-    
-    callButton.classList.remove('active');
-    callButton.textContent = '🎧';
-    callButton.title = 'Audio Call';
-    
-    updateStatus('', '');
-    isCallActive = false;
 }
 
 // Toggle screen share
 async function toggleScreenShare() {
+    const screenBtn = document.getElementById('screenBtn');
+    
     if (isScreenSharing) {
-        stopScreenShare();
+        // Stop screen sharing
+        if (screenPeerConnection) {
+            screenPeerConnection.close();
+            screenPeerConnection = null;
+        }
+        if (screenStream) {
+            screenStream.getTracks().forEach(track => track.stop());
+        }
+        
+        isScreenSharing = false;
+        screenBtn.classList.remove('sharing');
+        updateStatus('screen-status', '', '');
+        addSystemMessage('Screen sharing stopped');
     } else {
-        await startScreenShare();
-    }
-}
-
-// OPTIMIZED: Start 1080p screen share with better bitrate control
-async function startScreenShare() {
-    try {
-        console.log('📺 Starting optimized screen share...');
-        
-        updateStatus('Requesting screen access...', 'connecting');
-        
-        // Check bandwidth first
-        const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-        let bandwidth = 'high';
-        if (connection) {
-            const downlink = connection.downlink || 10;
-            if (downlink < 2) bandwidth = 'low';
-            else if (downlink < 5) bandwidth = 'medium';
-            else bandwidth = 'high';
-        }
-        
-        console.log('📊 Detected bandwidth:', bandwidth);
-        
-        // Adjust quality based on bandwidth
-        let videoConstraints = {
-            width: { ideal: 1920, max: 1920 },
-            height: { ideal: 1080, max: 1080 },
-            frameRate: { ideal: 30 }
-        };
-        
-        if (bandwidth === 'low') {
-            videoConstraints = {
-                width: { ideal: 854, max: 1280 },
-                height: { ideal: 480, max: 720 },
-                frameRate: { ideal: 15, max: 20 }
-            };
-            updateBitrate('Low bandwidth mode (480p)');
-        } else if (bandwidth === 'medium') {
-            videoConstraints = {
-                width: { ideal: 1280, max: 1280 },
-                height: { ideal: 720, max: 720 },
-                frameRate: { ideal: 24, max: 30 }
-            };
-            updateBitrate('Medium bandwidth mode (720p)');
-        } else {
-            updateBitrate('High bandwidth mode (1080p)');
-        }
-        
-        // Request screen share
-        screenStream = await navigator.mediaDevices.getDisplayMedia({ 
-            video: videoConstraints,
-            audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true,
-                sampleRate: 48000
-            }
-        });
-        
-        // Optimize video track
-        const videoTrack = screenStream.getVideoTracks()[0];
-        if (videoTrack) {
-            const settings = videoTrack.getSettings();
-            console.log('📊 Screen resolution:', settings);
-            
-            // Apply additional constraints for smoother playback
-            await videoTrack.applyConstraints({
-                width: { ideal: settings.width },
-                height: { ideal: settings.height },
-                frameRate: { ideal: 30, max: 30 }
+        // Start screen sharing
+        try {
+            screenStream = await navigator.mediaDevices.getDisplayMedia({
+                video: {
+                    width: { ideal: 3840 },
+                    height: { ideal: 2160 },
+                    frameRate: { ideal: 60 }
+                },
+                audio: false
             });
-        }
-        
-        // Handle audio
-        const audioTracks = screenStream.getAudioTracks();
-        if (audioTracks.length === 0) {
-            console.log('Adding microphone for audio');
-            try {
-                const micStream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true,
-                        sampleRate: 48000
-                    }
-                });
-                micStream.getAudioTracks().forEach(track => {
-                    screenStream.addTrack(track);
-                });
-            } catch (micError) {
-                console.warn('Could not add microphone:', micError);
+            
+            screenBtn.classList.add('sharing');
+            updateStatus('screen-status', 'Sharing screen', 'connected');
+            
+            await createScreenPeerConnection();
+            
+            isScreenSharing = true;
+            addSystemMessage('📺 Started screen sharing');
+            
+            // Handle stop from browser UI
+            screenStream.getVideoTracks()[0].onended = () => {
+                toggleScreenShare();
+            };
+            
+        } catch (err) {
+            console.error('Screen share error:', err);
+            if (err.name !== 'NotAllowedError' && err.name !== 'PermissionDeniedError') {
+                alert('Could not start screen sharing');
             }
+            screenBtn.classList.remove('sharing');
         }
-        
-        // Update UI
-        screenButton.classList.add('sharing');
-        screenButton.textContent = '⏹️';
-        screenButton.title = 'Stop Sharing';
-        
-        updateStatus('Sharing screen...', 'screen-sharing');
-        
-        socket.emit('join-room', 'main-room');
-        isScreenSharing = true;
-        
-        // Handle stop event
-        screenStream.getVideoTracks()[0].onended = () => {
-            console.log('Screen sharing stopped');
-            stopScreenShare();
-        };
-        
-    } catch (err) {
-        console.error('❌ Screen share error:', err);
-        if (err.name !== 'NotAllowedError') {
-            alert('Could not share screen: ' + err.message);
-        }
-        updateStatus('', '');
     }
 }
 
-// Stop screen share
-function stopScreenShare() {
-    console.log('⏹️ Stopping screen share...');
+// Create peer connection for screen sharing
+async function createScreenPeerConnection() {
+    screenPeerConnection = new RTCPeerConnection(configuration);
     
-    if (screenStream) {
-        screenStream.getTracks().forEach(track => track.stop());
-        screenStream = null;
-    }
-    
-    screenButton.classList.remove('sharing');
-    screenButton.textContent = '📺';
-    screenButton.title = 'Share Screen';
-    
-    if (!isCallActive) {
-        updateStatus('', '');
-    } else {
-        updateStatus('Audio only', 'connected');
-    }
-    
-    document.getElementById('quality-indicator').classList.remove('visible');
-    updateBitrate('');
-    isScreenSharing = false;
-}
-
-// Close fullscreen view
-function closeScreenView() {
-    document.getElementById('screen-container').classList.remove('active');
-}
-
-// Update status display
-function updateStatus(text, type) {
-    const status = document.getElementById('call-status');
-    if (text) {
-        status.textContent = text;
-        status.className = 'status-badge active ' + type;
-    } else {
-        status.className = 'status-badge';
-    }
-}
-
-// Update bitrate display
-function updateBitrate(text) {
-    const bitrateStatus = document.getElementById('bitrate-status');
-    if (text) {
-        bitrateStatus.textContent = text;
-        bitrateStatus.classList.add('active');
-    } else {
-        bitrateStatus.classList.remove('active');
-    }
-}
-
-// OPTIMIZED: Create peer connection with better settings
-function createPeerConnection(peerId) {
-    console.log('🔄 Creating optimized peer connection');
-    
-    const pc = new RTCPeerConnection(configuration);
-    
-    // Add tracks
-    const activeStream = screenStream || localStream;
-    if (activeStream) {
-        activeStream.getTracks().forEach(track => {
-            console.log(`➕ Adding ${track.kind} track`);
-            pc.addTrack(track, activeStream);
-        });
-    }
-    
-    // Handle incoming tracks with optimizations
-    pc.ontrack = (event) => {
-        console.log(`📥 Received ${event.track.kind} track`);
-        
-        if (event.track.kind === 'audio') {
-            // Optimized audio playback
-            remoteAudio.srcObject = event.streams[0];
-            remoteAudio.volume = 1.0;
-            remoteAudio.play()
-                .then(() => console.log('✅ Audio playing'))
-                .catch(e => console.log('Audio play error:', e));
-        } else if (event.track.kind === 'video') {
-            // Optimized video playback
-            remoteScreen.srcObject = event.streams[0];
-            document.getElementById('screen-container').classList.add('active');
-            document.getElementById('quality-indicator').classList.add('visible');
-            
-            // Get video settings
-            const settings = event.track.getSettings();
-            const resolution = settings.width >= 1920 ? '1080p' : 
-                             settings.width >= 1280 ? '720p' : '480p';
-            document.getElementById('quality-indicator').innerHTML = `📺 ${resolution} ${settings.frameRate || 30}fps`;
-            
-            remoteScreen.play()
-                .then(() => console.log('✅ Video playing'))
-                .catch(e => console.log('Video play error:', e));
-        }
-    };
+    // Add screen video track
+    screenStream.getTracks().forEach(track => {
+        screenPeerConnection.addTrack(track, screenStream);
+    });
     
     // Handle ICE candidates
-    pc.onicecandidate = (event) => {
+    screenPeerConnection.onicecandidate = (event) => {
         if (event.candidate) {
-            socket.emit('ice-candidate', {
-                target: peerId,
-                candidate: event.candidate
+            socket.emit('screen-ice-candidate', {
+                candidate: event.candidate,
+                target: currentRoom
             });
         }
     };
     
-    // Monitor connection stats
-    pc.onconnectionstatechange = () => {
-        console.log('📊 Connection state:', pc.connectionState);
-        if (pc.connectionState === 'connected') {
-            if (isScreenSharing) {
-                updateStatus('Sharing screen...', 'screen-sharing');
-            } else if (isCallActive) {
-                updateStatus('Connected - Audio active', 'connected');
-            }
-            
-            // Start monitoring stats
-            monitorConnectionStats(pc);
-        }
-    };
+    // Create and send offer
+    const offer = await screenPeerConnection.createOffer({
+        offerToReceiveVideo: false,
+        offerToReceiveAudio: false
+    });
     
-    peerConnection = pc;
-    return pc;
+    await screenPeerConnection.setLocalDescription(offer);
+    
+    socket.emit('screen-offer', {
+        offer: offer,
+        target: currentRoom
+    });
 }
 
-// Monitor connection statistics
-async function monitorConnectionStats(pc) {
-    try {
-        const stats = await pc.getStats();
-        stats.forEach(report => {
-            if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-                if (report.availableOutgoingBitrate) {
-                    const bitrate = (report.availableOutgoingBitrate / 1000000).toFixed(1);
-                    console.log(`📊 Available bitrate: ${bitrate} Mbps`);
-                }
-            }
-            if (report.type === 'outbound-rtp' && report.mediaType === 'video') {
-                if (report.qualityLimitationReason !== 'none') {
-                    console.log(`⚠️ Quality limited by: ${report.qualityLimitationReason}`);
-                }
-            }
-        });
-    } catch (e) {
-        console.log('Stats monitoring error:', e);
+// Close screen view
+function closeScreenView() {
+    document.getElementById('screen-container').classList.remove('active');
+    const video = document.getElementById('remote-screen');
+    video.srcObject = null;
+}
+
+// Update status badge
+function updateStatus(elementId, text, className) {
+    const element = document.getElementById(elementId);
+    element.textContent = text;
+    element.className = 'status-badge';
+    if (className) {
+        element.classList.add('active', className);
+    } else {
+        element.classList.remove('active');
     }
 }
 
-// Signaling events
-socket.on('user-joined-room', async (userId) => {
-    console.log('👤 User joined room:', userId);
-    
-    if ((isCallActive || isScreenSharing) && userId !== socket.id) {
-        console.log('📞 Creating offer');
-        
-        const pc = createPeerConnection(userId);
-        const offer = await pc.createOffer({
-            offerToReceiveAudio: true,
-            offerToReceiveVideo: true,
-            voiceActivityDetection: true
-        });
-        
-        await pc.setLocalDescription(offer);
-        socket.emit('offer', { target: userId, offer: offer });
-    }
+// Add system message to chat
+function addSystemMessage(message) {
+    const messagesDiv = document.getElementById('messages');
+    const messageElement = document.createElement('div');
+    messageElement.className = 'message system';
+    messageElement.textContent = message;
+    messagesDiv.appendChild(messageElement);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+// Socket event handlers
+socket.on('connect', () => {
+    console.log('✅ Connected to server');
 });
 
+socket.on('disconnect', () => {
+    console.log('❌ Disconnected from server');
+    addSystemMessage('Disconnected from server');
+});
+
+socket.on('new-message', (data) => {
+    const messagesDiv = document.getElementById('messages');
+    const messageElement = document.createElement('div');
+    messageElement.className = 'message';
+    messageElement.innerHTML = `
+        <strong>${data.user}</strong>
+        <span>${data.message}</span>
+        <small>${data.time}</small>
+    `;
+    messagesDiv.appendChild(messageElement);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+});
+
+socket.on('user-joined', (data) => {
+    addSystemMessage(data.message);
+});
+
+socket.on('user-left', (data) => {
+    addSystemMessage(data.message);
+});
+
+// Audio signaling
 socket.on('offer', async (data) => {
-    console.log('📥 Received offer');
+    console.log('📲 Received offer from:', data.sender);
     
-    if (isCallActive || isScreenSharing) {
-        const pc = createPeerConnection(data.sender);
-        await pc.setRemoteDescription(data.offer);
+    if (!peerConnection) {
+        await createPeerConnection();
+    }
+    
+    try {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
         
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
+        socket.emit('answer', {
+            answer: answer,
+            target: data.sender
+        });
         
-        socket.emit('answer', { target: data.sender, answer: answer });
+        console.log('📲 Answer sent');
+    } catch (err) {
+        console.error('Error handling offer:', err);
     }
 });
 
 socket.on('answer', async (data) => {
-    console.log('📥 Received answer');
-    if (peerConnection) {
-        await peerConnection.setRemoteDescription(data.answer);
-        console.log('✅ Connection established');
+    console.log('📲 Received answer');
+    try {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+    } catch (err) {
+        console.error('Error handling answer:', err);
     }
 });
 
 socket.on('ice-candidate', async (data) => {
-    if (peerConnection) {
-        await peerConnection.addIceCandidate(data.candidate);
+    try {
+        if (peerConnection) {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+        }
+    } catch (err) {
+        console.error('Error adding ICE candidate:', err);
     }
 });
 
-socket.on('user-left-room', (userId) => {
-    console.log('👋 User left room');
-    if (isScreenSharing) {
-        closeScreenView();
+// Screen sharing signaling
+socket.on('screen-offer', async (data) => {
+    console.log('📺 Received screen offer');
+    
+    screenPeerConnection = new RTCPeerConnection(configuration);
+    
+    screenPeerConnection.ontrack = (event) => {
+        console.log('📺 Received screen track');
+        const video = document.getElementById('remote-screen');
+        video.srcObject = event.streams[0];
+        document.getElementById('screen-container').classList.add('active');
+        document.getElementById('quality-indicator').classList.add('visible');
+        updateStatus('screen-status', 'Viewing screen', 'connected');
+    };
+    
+    screenPeerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+            socket.emit('screen-ice-candidate', {
+                candidate: event.candidate,
+                target: data.sender
+            });
+        }
+    };
+    
+    try {
+        await screenPeerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+        const answer = await screenPeerConnection.createAnswer();
+        await screenPeerConnection.setLocalDescription(answer);
+        
+        socket.emit('screen-answer', {
+            answer: answer,
+            target: data.sender
+        });
+    } catch (err) {
+        console.error('Error handling screen offer:', err);
     }
 });
 
-// Handle page close
-window.addEventListener('beforeunload', () => {
-    if (isScreenSharing) stopScreenShare();
-    if (isCallActive) endCall();
+socket.on('screen-answer', async (data) => {
+    try {
+        await screenPeerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+    } catch (err) {
+        console.error('Error handling screen answer:', err);
+    }
+});
+
+socket.on('screen-ice-candidate', async (data) => {
+    try {
+        if (screenPeerConnection) {
+            await screenPeerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+        }
+    } catch (err) {
+        console.error('Error adding screen ICE candidate:', err);
+    }
 });

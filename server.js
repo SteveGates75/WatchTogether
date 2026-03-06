@@ -10,11 +10,17 @@ const io = socketIo(server, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
-  }
+  },
+  transports: ['websocket', 'polling'] // Important for Render
 });
 
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Health check for Render
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', message: 'Server is running' });
+});
 
 // Store connected users
 const users = {};
@@ -22,6 +28,11 @@ let roomUsers = [];
 
 io.on('connection', (socket) => {
   console.log('New user connected:', socket.id);
+  console.log('Transport:', socket.conn.transport.name);
+
+  socket.conn.on('upgrade', (transport) => {
+    console.log('Transport upgraded to:', transport.name);
+  });
 
   // Handle user joining with username
   socket.on('join', (username) => {
@@ -52,8 +63,6 @@ io.on('connection', (socket) => {
   socket.on('join-room', (roomId) => {
     socket.join(roomId);
     roomUsers.push(socket.id);
-    
-    // Notify others in the room
     socket.to(roomId).emit('user-joined-room', socket.id);
   });
 
@@ -85,6 +94,28 @@ io.on('connection', (socket) => {
     });
   });
 
+  // Screen sharing signaling
+  socket.on('screen-offer', (data) => {
+    socket.to(data.target).emit('screen-offer', {
+      offer: data.offer,
+      sender: socket.id
+    });
+  });
+
+  socket.on('screen-answer', (data) => {
+    socket.to(data.target).emit('screen-answer', {
+      answer: data.answer,
+      sender: socket.id
+    });
+  });
+
+  socket.on('screen-ice-candidate', (data) => {
+    socket.to(data.target).emit('screen-ice-candidate', {
+      candidate: data.candidate,
+      sender: socket.id
+    });
+  });
+
   // Handle disconnection
   socket.on('disconnect', () => {
     const user = users[socket.id];
@@ -97,7 +128,6 @@ io.on('connection', (socket) => {
       delete users[socket.id];
     }
     
-    // Remove from room and notify others
     if (roomUsers.includes(socket.id)) {
       roomUsers = roomUsers.filter(id => id !== socket.id);
       io.to('main-room').emit('user-left-room', socket.id);
