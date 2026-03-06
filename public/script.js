@@ -14,44 +14,30 @@ let isVideoActive = false;
 let audioContext;
 let localAudio;
 let isFullscreen = false;
-let screenShareActive = false; // Track if someone is sharing screen
-let currentScreenSharer = null; // Store who is sharing
+let screenShareActive = false;
+let currentScreenSharer = null;
+let isViewingScreen = false;
+let pendingIceCandidates = []; // Store ICE candidates until connection is ready
 
 // Advanced audio constraints for better quality and noise cancellation
 const audioConstraints = {
     audio: {
-        // High quality audio
-        channelCount: 2, // Stereo
-        sampleRate: 48000, // 48kHz
-        sampleSize: 24, // 24-bit
+        channelCount: 2,
+        sampleRate: 48000,
+        sampleSize: 24,
         volume: 1.0,
-        
-        // Advanced noise cancellation
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
-        
-        // Additional audio processing
-        voiceIsolation: true, // Isolate voice from background
-        noiseSuppressionLevel: 'high', // 'low', 'medium', 'high'
-        
-        // Browser-specific optimizations
+        voiceIsolation: true,
+        noiseSuppressionLevel: 'high',
         googEchoCancellation: true,
         googAutoGainControl: true,
         googNoiseSuppression: true,
         googHighpassFilter: true,
         googTypingNoiseDetection: true,
-        
-        // Audio quality settings
-        latency: 0.01, // Low latency
-        volume: 1.0,
-        
-        // Modern audio processing
-        audioProcessing: {
-            enable: true,
-            noiseReduction: 'high',
-            echoReduction: 'high'
-        }
+        latency: 0.01,
+        volume: 1.0
     }
 };
 
@@ -61,15 +47,10 @@ const configuration = {
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
-        { urls: 'stun:stun.ekiga.net' },
-        { urls: 'stun:stun.ideasip.com' },
-        { urls: 'stun:stun.schlund.de' }
+        { urls: 'stun:stun4.l.google.com:19302' }
     ],
     iceTransportPolicy: 'all',
-    iceCandidatePoolSize: 10,
-    bundlePolicy: 'max-bundle',
-    rtcpMuxPolicy: 'require'
+    iceCandidatePoolSize: 10
 };
 
 // Login function
@@ -96,11 +77,8 @@ function login() {
 // Initialize chat
 function initializeChat() {
     const messageInput = document.getElementById('message-input');
-    
     messageInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            sendMessage();
-        }
+        if (e.key === 'Enter') sendMessage();
     });
 }
 
@@ -118,84 +96,22 @@ function sendMessage() {
 // Setup audio with advanced noise cancellation
 async function setupAudio() {
     try {
-        // Request audio with advanced constraints
         localStream = await navigator.mediaDevices.getUserMedia(audioConstraints);
-        
         console.log('✅ High-quality microphone access granted');
-        console.log('Audio settings:', localStream.getAudioTracks()[0].getSettings());
-        
         updateStatus('call-status', '🎤 High-quality mic ready', 'connected');
         
-        // Apply additional audio processing
-        const audioTrack = localStream.getAudioTracks()[0];
-        
-        // Apply audio processing if available
-        if (audioTrack.applyConstraints) {
-            try {
-                await audioTrack.applyConstraints({
-                    noiseSuppression: true,
-                    echoCancellation: true,
-                    autoGainControl: true
-                });
-                console.log('✅ Audio processing applied');
-            } catch (err) {
-                console.warn('Could not apply advanced audio constraints:', err);
-            }
-        }
-        
-        // Create muted local audio element to prevent echo
         localAudio = document.createElement('audio');
         localAudio.srcObject = localStream;
         localAudio.muted = true;
         localAudio.autoplay = true;
         document.body.appendChild(localAudio);
         
-        // Visualize audio levels
         setupAudioVisualizer();
-        
-        // Monitor audio levels
-        monitorAudioLevels();
         
     } catch (err) {
         console.error('❌ Microphone error:', err);
         updateStatus('call-status', '❌ Mic error', 'error');
-        
-        if (err.name === 'NotAllowedError') {
-            alert('Please allow microphone access for high-quality audio');
-        } else if (err.name === 'NotFoundError') {
-            alert('No microphone found. Please connect a microphone.');
-        } else if (err.name === 'NotReadableError') {
-            alert('Microphone is busy. Please close other apps using it.');
-        }
     }
-}
-
-// Monitor audio levels for debugging
-function monitorAudioLevels() {
-    if (!localStream) return;
-    
-    const audioContext = new AudioContext();
-    const source = audioContext.createMediaStreamSource(localStream);
-    const analyzer = audioContext.createAnalyser();
-    analyzer.fftSize = 256;
-    
-    source.connect(analyzer);
-    
-    const dataArray = new Uint8Array(analyzer.frequencyBinCount);
-    
-    function checkLevels() {
-        analyzer.getByteFrequencyData(dataArray);
-        const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-        
-        // Log if audio is too high (might cause distortion)
-        if (average > 200) {
-            console.log('⚠️ Audio level high, possible distortion');
-        }
-        
-        requestAnimationFrame(checkLevels);
-    }
-    
-    // checkLevels();
 }
 
 // Audio visualizer
@@ -206,7 +122,6 @@ function setupAudioVisualizer() {
     const source = audioContext.createMediaStreamSource(localStream);
     const analyzer = audioContext.createAnalyser();
     analyzer.fftSize = 256;
-    
     source.connect(analyzer);
     
     const dataArray = new Uint8Array(analyzer.frequencyBinCount);
@@ -221,8 +136,6 @@ function setupAudioVisualizer() {
         const visualizer = document.getElementById('visualizer-bar');
         if (visualizer) {
             visualizer.style.width = percentage + '%';
-            
-            // Change color based on volume
             if (percentage > 70) {
                 visualizer.style.background = 'linear-gradient(90deg, #ed4245, #5865f2)';
             } else {
@@ -259,7 +172,6 @@ async function toggleCall() {
         document.getElementById('audio-visualizer').classList.remove('active');
         addSystemMessage('Call ended');
         
-        // Remove remote audio
         const remoteAudio = document.getElementById('remote-audio');
         if (remoteAudio) remoteAudio.remove();
     } else {
@@ -284,22 +196,16 @@ async function toggleCall() {
 async function createPeerConnection() {
     peerConnection = new RTCPeerConnection(configuration);
     
-    // Add local audio tracks with high priority
     localStream.getTracks().forEach(track => {
-        // Set audio track priority
         if (track.kind === 'audio') {
             track.enabled = true;
-            // Add to connection with high priority
             peerConnection.addTrack(track, localStream);
-            console.log('🎤 Added audio track with settings:', track.getSettings());
         }
     });
     
-    // Handle incoming audio
     peerConnection.ontrack = (event) => {
         console.log('🔊 Received high-quality remote audio');
         
-        // Create audio element for remote stream with high quality
         const remoteAudio = new Audio();
         remoteAudio.srcObject = event.streams[0];
         remoteAudio.autoplay = true;
@@ -307,13 +213,6 @@ async function createPeerConnection() {
         remoteAudio.setAttribute('playsinline', true);
         remoteAudio.muted = false;
         
-        // Set audio quality
-        remoteAudio.audioTracks[0]?.applyConstraints({
-            noiseSuppression: true,
-            echoCancellation: true
-        }).catch(() => {});
-        
-        // Add to DOM
         remoteAudio.id = 'remote-audio';
         const existing = document.getElementById('remote-audio');
         if (existing) existing.remove();
@@ -323,7 +222,6 @@ async function createPeerConnection() {
         addSystemMessage('🔊 Connected to high-quality remote audio');
     };
     
-    // Handle ICE candidates
     peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
             socket.emit('ice-candidate', {
@@ -333,16 +231,14 @@ async function createPeerConnection() {
         }
     };
     
-    // Handle connection state
     peerConnection.onconnectionstatechange = () => {
         console.log('Connection state:', peerConnection.connectionState);
         
         if (peerConnection.connectionState === 'connected') {
-            // Get connection stats
             peerConnection.getStats().then(stats => {
                 stats.forEach(report => {
                     if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-                        console.log('✅ Audio connection established via:', report.localCandidateId);
+                        console.log('✅ Audio connection established');
                     }
                 });
             });
@@ -357,13 +253,11 @@ async function createPeerConnection() {
             updateStatus('call-status', 'Disconnected', 'error');
             addSystemMessage('Call disconnected');
             
-            // Remove remote audio
             const remoteAudio = document.getElementById('remote-audio');
             if (remoteAudio) remoteAudio.remove();
         }
     };
     
-    // Create and send offer with high-quality audio
     try {
         const offer = await peerConnection.createOffer({
             offerToReceiveAudio: true,
@@ -390,10 +284,8 @@ async function toggleScreenShare() {
     const screenBtn = document.getElementById('screenBtn');
     
     if (isScreenSharing) {
-        // Stop screen sharing
         stopScreenShare();
     } else {
-        // Start screen sharing
         try {
             screenStream = await navigator.mediaDevices.getDisplayMedia({
                 video: {
@@ -407,13 +299,14 @@ async function toggleScreenShare() {
             screenBtn.classList.add('sharing');
             updateStatus('screen-status', 'Sharing screen', 'connected');
             
+            // Create new connection for screen sharing
             await createScreenPeerConnection();
             
             isScreenSharing = true;
             screenShareActive = true;
             currentScreenSharer = socket.id;
             
-            // Notify everyone that screen sharing started
+            // Notify everyone
             socket.emit('screen-sharing-started', {
                 sharer: socket.id,
                 username: username
@@ -421,16 +314,12 @@ async function toggleScreenShare() {
             
             addSystemMessage(`📺 ${username} started sharing screen`);
             
-            // Handle stop from browser UI
             screenStream.getVideoTracks()[0].onended = () => {
                 stopScreenShare();
             };
             
         } catch (err) {
             console.error('Screen share error:', err);
-            if (err.name !== 'NotAllowedError' && err.name !== 'PermissionDeniedError') {
-                alert('Could not start screen sharing');
-            }
             screenBtn.classList.remove('sharing');
         }
     }
@@ -438,12 +327,16 @@ async function toggleScreenShare() {
 
 // Stop screen share
 function stopScreenShare() {
+    // Close all peer connections
     if (screenPeerConnection) {
         screenPeerConnection.close();
         screenPeerConnection = null;
     }
+    
+    // Stop all tracks
     if (screenStream) {
         screenStream.getTracks().forEach(track => track.stop());
+        screenStream = null;
     }
     
     isScreenSharing = false;
@@ -453,59 +346,158 @@ function stopScreenShare() {
     document.getElementById('joinVideoBtn').classList.remove('active');
     updateStatus('screen-status', '', '');
     
-    // Notify everyone that screen sharing stopped
     socket.emit('screen-sharing-stopped');
     addSystemMessage('Screen sharing stopped');
 }
 
-// Join video (rejoin screen share)
-function joinVideo() {
-    if (screenShareActive && currentScreenSharer) {
-        addSystemMessage('🔄 Rejoining video...');
+// JOIN VIDEO - FIXED VERSION
+async function joinVideo() {
+    console.log('🎬 Join video clicked. Active:', screenShareActive, 'Sharer:', currentScreenSharer);
+    
+    if (!screenShareActive || !currentScreenSharer) {
+        addSystemMessage('❌ No active screen share to join');
+        return;
+    }
+    
+    // Don't try to join if we're already viewing
+    if (isViewingScreen) {
+        console.log('Already viewing screen');
+        return;
+    }
+    
+    addSystemMessage('🔄 Connecting to video stream...');
+    updateStatus('video-status', 'Connecting...', 'connecting');
+    document.getElementById('joinVideoBtn').classList.add('active');
+    
+    try {
+        // Close any existing connection
+        if (screenPeerConnection) {
+            screenPeerConnection.close();
+            screenPeerConnection = null;
+        }
         
-        // Request to join the active screen share
-        socket.emit('request-screen-join', {
-            target: currentScreenSharer
+        // Clear any pending ICE candidates
+        pendingIceCandidates = [];
+        
+        // Create new peer connection for receiving
+        screenPeerConnection = new RTCPeerConnection(configuration);
+        
+        // Set up event handlers
+        screenPeerConnection.ontrack = handleScreenTrack;
+        screenPeerConnection.onicecandidate = handleScreenIceCandidate;
+        screenPeerConnection.onconnectionstatechange = handleScreenConnectionState;
+        screenPeerConnection.oniceconnectionstatechange = handleIceConnectionState;
+        
+        // Create data channel for signaling (optional)
+        screenPeerConnection.createDataChannel('screen');
+        
+        // Create and send offer to the sharer
+        console.log('Creating offer for screen share');
+        const offer = await screenPeerConnection.createOffer({
+            offerToReceiveVideo: true,
+            offerToReceiveAudio: true
         });
         
-        updateStatus('video-status', 'Connecting to video...', 'connecting');
-        document.getElementById('joinVideoBtn').classList.add('active');
-    } else {
-        addSystemMessage('No active screen share to join');
+        await screenPeerConnection.setLocalDescription(offer);
+        
+        // Send offer to the screen sharer
+        socket.emit('request-screen-join', {
+            target: currentScreenSharer,
+            offer: offer
+        });
+        
+        // Set timeout for connection
+        setTimeout(() => {
+            if (!isViewingScreen) {
+                console.log('Connection timeout');
+                addSystemMessage('⏱️ Connection timeout. Please try again.');
+                updateStatus('video-status', 'Timeout', 'error');
+                
+                if (screenPeerConnection) {
+                    screenPeerConnection.close();
+                    screenPeerConnection = null;
+                }
+            }
+        }, 10000);
+        
+    } catch (err) {
+        console.error('Error joining video:', err);
+        addSystemMessage('❌ Failed to join video: ' + err.message);
+        updateStatus('video-status', 'Failed', 'error');
+        
+        if (screenPeerConnection) {
+            screenPeerConnection.close();
+            screenPeerConnection = null;
+        }
     }
 }
 
-// Create peer connection for screen sharing
-async function createScreenPeerConnection() {
-    screenPeerConnection = new RTCPeerConnection(configuration);
+// Handle incoming screen track
+function handleScreenTrack(event) {
+    console.log('📺 Received screen track:', event.track.kind);
     
-    // Add screen video track (and audio if available)
-    screenStream.getTracks().forEach(track => {
-        screenPeerConnection.addTrack(track, screenStream);
-    });
+    const video = document.getElementById('remote-screen');
+    if (!video) return;
     
-    // Handle ICE candidates
-    screenPeerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-            socket.emit('screen-ice-candidate', {
-                candidate: event.candidate,
-                target: currentRoom
-            });
-        }
-    };
+    // Set the stream
+    video.srcObject = event.streams[0];
     
-    // Create and send offer
-    const offer = await screenPeerConnection.createOffer({
-        offerToReceiveVideo: false,
-        offerToReceiveAudio: false
-    });
+    // Show the video container
+    document.getElementById('screen-container').classList.add('active');
+    document.getElementById('quality-indicator').classList.add('visible');
     
-    await screenPeerConnection.setLocalDescription(offer);
+    // Update status
+    isViewingScreen = true;
+    updateStatus('screen-status', 'Viewing screen', 'connected');
+    updateStatus('video-status', 'Watching', 'connected');
     
-    socket.emit('screen-offer', {
-        offer: offer,
-        target: currentRoom
-    });
+    addSystemMessage('✅ Connected to video stream');
+    showFullscreenHint('⛶ Click Fullscreen for better view');
+    
+    // Log video info
+    if (event.track.kind === 'video') {
+        const settings = event.track.getSettings();
+        console.log('Video resolution:', settings.width, 'x', settings.height);
+    }
+    
+    // Play video
+    video.play().catch(err => console.warn('Auto-play prevented:', err));
+}
+
+// Handle ICE candidates for screen
+function handleScreenIceCandidate(event) {
+    if (event.candidate) {
+        console.log('Sending ICE candidate');
+        socket.emit('screen-ice-candidate', {
+            candidate: event.candidate,
+            target: currentScreenSharer
+        });
+    }
+}
+
+// Handle connection state changes
+function handleScreenConnectionState(event) {
+    console.log('Screen connection state:', screenPeerConnection?.connectionState);
+    
+    if (screenPeerConnection?.connectionState === 'connected') {
+        console.log('✅ Screen connection established');
+        isViewingScreen = true;
+    } else if (screenPeerConnection?.connectionState === 'failed' || 
+               screenPeerConnection?.connectionState === 'disconnected') {
+        console.log('❌ Screen connection lost');
+        isViewingScreen = false;
+        updateStatus('video-status', 'Disconnected', 'error');
+    }
+}
+
+// Handle ICE connection state
+function handleIceConnectionState(event) {
+    console.log('ICE connection state:', screenPeerConnection?.iceConnectionState);
+    
+    if (screenPeerConnection?.iceConnectionState === 'failed') {
+        console.log('ICE failed, attempting restart');
+        screenPeerConnection.restartIce();
+    }
 }
 
 // FULLSCREEN FUNCTIONS
@@ -593,17 +585,31 @@ function closeScreenView() {
         isFullscreen = false;
     }
     
+    // Clean up connection
+    if (screenPeerConnection) {
+        screenPeerConnection.close();
+        screenPeerConnection = null;
+    }
+    
     document.getElementById('screen-container').classList.remove('active');
     const video = document.getElementById('remote-screen');
     video.srcObject = null;
     
+    isViewingScreen = false;
     document.getElementById('fullscreenBtn').innerHTML = '<span id="fullscreenIcon">⛶</span> Fullscreen';
-    document.getElementById('joinVideoBtn').classList.remove('active');
+    updateStatus('video-status', '', '');
+    
+    // Keep join button active if screen share is still active
+    if (screenShareActive) {
+        document.getElementById('joinVideoBtn').classList.add('active');
+    }
 }
 
 // Update status badge
 function updateStatus(elementId, text, className) {
     const element = document.getElementById(elementId);
+    if (!element) return;
+    
     element.textContent = text;
     element.className = 'status-badge';
     if (className) {
@@ -656,6 +662,7 @@ socket.on('user-left', (data) => {
 
 // Screen sharing notifications
 socket.on('screen-sharing-started', (data) => {
+    console.log('Screen sharing started by:', data.username);
     screenShareActive = true;
     currentScreenSharer = data.sharer;
     
@@ -677,6 +684,7 @@ socket.on('screen-sharing-started', (data) => {
 });
 
 socket.on('screen-sharing-stopped', () => {
+    console.log('Screen sharing stopped');
     screenShareActive = false;
     currentScreenSharer = null;
     document.getElementById('joinVideoBtn').classList.remove('active');
@@ -689,42 +697,85 @@ socket.on('screen-sharing-stopped', () => {
     addSystemMessage('📺 Screen sharing ended');
 });
 
-socket.on('request-screen-join', async (data) => {
-    // If we're sharing screen, send offer to the requester
-    if (isScreenSharing && screenStream) {
-        console.log('📺 Sending screen to rejoining user');
+// Handle screen join request response - FIXED VERSION
+socket.on('screen-offer', async (data) => {
+    console.log('📺 Received screen offer from sharer');
+    
+    if (!screenPeerConnection) {
+        console.log('Creating new peer connection for screen');
+        screenPeerConnection = new RTCPeerConnection(configuration);
         
-        // Create new peer connection for this user
-        const tempPeerConnection = new RTCPeerConnection(configuration);
+        screenPeerConnection.ontrack = handleScreenTrack;
+        screenPeerConnection.onicecandidate = handleScreenIceCandidate;
+        screenPeerConnection.onconnectionstatechange = handleScreenConnectionState;
+        screenPeerConnection.oniceconnectionstatechange = handleIceConnectionState;
+    }
+    
+    try {
+        await screenPeerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+        console.log('Remote description set');
         
-        // Add tracks
-        screenStream.getTracks().forEach(track => {
-            tempPeerConnection.addTrack(track, screenStream);
+        const answer = await screenPeerConnection.createAnswer();
+        await screenPeerConnection.setLocalDescription(answer);
+        console.log('Answer created and set');
+        
+        socket.emit('screen-answer', {
+            answer: answer,
+            target: data.sender
         });
         
-        // Handle ICE candidates
-        tempPeerConnection.onicecandidate = (event) => {
-            if (event.candidate) {
-                socket.emit('screen-ice-candidate', {
-                    candidate: event.candidate,
-                    target: data.requester
-                });
+        // Process any pending ICE candidates
+        while (pendingIceCandidates.length > 0) {
+            const candidate = pendingIceCandidates.shift();
+            try {
+                await screenPeerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                console.log('Added pending ICE candidate');
+            } catch (err) {
+                console.warn('Error adding pending ICE candidate:', err);
             }
-        };
-        
-        // Create offer
-        const offer = await tempPeerConnection.createOffer();
-        await tempPeerConnection.setLocalDescription(offer);
-        
-        socket.emit('screen-offer', {
-            offer: offer,
-            target: data.requester
-        });
-        
-        // Store connection
-        if (!screenPeerConnection) {
-            screenPeerConnection = tempPeerConnection;
         }
+        
+    } catch (err) {
+        console.error('Error handling screen offer:', err);
+        addSystemMessage('❌ Failed to connect to video');
+    }
+});
+
+socket.on('screen-answer', async (data) => {
+    console.log('📺 Received screen answer');
+    
+    if (!screenPeerConnection) {
+        console.warn('No peer connection for answer');
+        return;
+    }
+    
+    try {
+        await screenPeerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+        console.log('Remote description set from answer');
+    } catch (err) {
+        console.error('Error handling screen answer:', err);
+    }
+});
+
+socket.on('screen-ice-candidate', async (data) => {
+    console.log('❄️ Received ICE candidate');
+    
+    if (!screenPeerConnection) {
+        console.log('Storing ICE candidate for later');
+        pendingIceCandidates.push(data.candidate);
+        return;
+    }
+    
+    try {
+        if (screenPeerConnection.remoteDescription) {
+            await screenPeerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+            console.log('Added ICE candidate');
+        } else {
+            console.log('No remote description yet, storing candidate');
+            pendingIceCandidates.push(data.candidate);
+        }
+    } catch (err) {
+        console.error('Error adding ICE candidate:', err);
     }
 });
 
@@ -771,74 +822,7 @@ socket.on('ice-candidate', async (data) => {
     }
 });
 
-// Screen sharing signaling
-socket.on('screen-offer', async (data) => {
-    console.log('📺 Received screen offer');
-    
-    if (screenPeerConnection) {
-        screenPeerConnection.close();
-    }
-    
-    screenPeerConnection = new RTCPeerConnection(configuration);
-    
-    screenPeerConnection.ontrack = (event) => {
-        console.log('📺 Received screen track');
-        const video = document.getElementById('remote-screen');
-        video.srcObject = event.streams[0];
-        document.getElementById('screen-container').classList.add('active');
-        document.getElementById('quality-indicator').classList.add('visible');
-        updateStatus('screen-status', 'Viewing screen', 'connected');
-        updateStatus('video-status', 'Watching', 'connected');
-        
-        showFullscreenHint('⛶ Click Fullscreen for better view');
-        
-        if (event.track.kind === 'audio') {
-            console.log('🔊 Screen audio received');
-        }
-    };
-    
-    screenPeerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-            socket.emit('screen-ice-candidate', {
-                candidate: event.candidate,
-                target: data.sender
-            });
-        }
-    };
-    
-    try {
-        await screenPeerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-        const answer = await screenPeerConnection.createAnswer();
-        await screenPeerConnection.setLocalDescription(answer);
-        
-        socket.emit('screen-answer', {
-            answer: answer,
-            target: data.sender
-        });
-    } catch (err) {
-        console.error('Error handling screen offer:', err);
-    }
-});
-
-socket.on('screen-answer', async (data) => {
-    try {
-        await screenPeerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-    } catch (err) {
-        console.error('Error handling screen answer:', err);
-    }
-});
-
-socket.on('screen-ice-candidate', async (data) => {
-    try {
-        if (screenPeerConnection) {
-            await screenPeerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-        }
-    } catch (err) {
-        console.error('Error adding screen ICE candidate:', err);
-    }
-});
-
-// Keyboard shortcut for fullscreen (F key)
+// Keyboard shortcut for fullscreen
 document.addEventListener('keydown', (e) => {
     if (e.key === 'f' || e.key === 'F') {
         const screenContainer = document.getElementById('screen-container');
@@ -855,19 +839,9 @@ document.addEventListener('keydown', (e) => {
 
 // Clean up on page unload
 window.addEventListener('beforeunload', () => {
-    if (localAudio) {
-        localAudio.remove();
-    }
-    if (peerConnection) {
-        peerConnection.close();
-    }
-    if (screenPeerConnection) {
-        screenPeerConnection.close();
-    }
-    if (localStream) {
-        localStream.getTracks().forEach(track => track.stop());
-    }
-    if (screenStream) {
-        screenStream.getTracks().forEach(track => track.stop());
-    }
+    if (localAudio) localAudio.remove();
+    if (peerConnection) peerConnection.close();
+    if (screenPeerConnection) screenPeerConnection.close();
+    if (localStream) localStream.getTracks().forEach(track => track.stop());
+    if (screenStream) screenStream.getTracks().forEach(track => track.stop());
 });

@@ -99,10 +99,14 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('screen-sharing-stopped');
   });
 
+  // Handle request to join screen share
   socket.on('request-screen-join', (data) => {
-    // Forward request to the screen sharer
-    io.to(data.target).emit('request-screen-join', {
-      requester: socket.id
+    console.log(`User ${socket.id} requesting to join screen from ${data.target}`);
+    
+    // Forward the offer to the screen sharer
+    io.to(data.target).emit('screen-offer', {
+      offer: data.offer,
+      sender: socket.id
     });
   });
 
