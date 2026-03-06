@@ -17,12 +17,10 @@ const io = socketIo(server, {
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Health check for Render
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Server is running' });
 });
 
-// Store connected users
 const users = {};
 let roomUsers = [];
 
@@ -34,7 +32,6 @@ io.on('connection', (socket) => {
     console.log('Transport upgraded to:', transport.name);
   });
 
-  // Handle user joining with username
   socket.on('join', (username) => {
     users[socket.id] = {
       id: socket.id,
@@ -47,7 +44,6 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Handle text messages
   socket.on('send-message', (data) => {
     const user = users[socket.id];
     if (user) {
@@ -59,7 +55,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Room management for calls/shares
   socket.on('join-room', (roomId) => {
     socket.join(roomId);
     roomUsers.push(socket.id);
@@ -116,7 +111,6 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Handle disconnection
   socket.on('disconnect', () => {
     const user = users[socket.id];
     if (user) {

@@ -11,7 +11,8 @@ let currentRoom = 'main-room';
 let isCallActive = false;
 let isScreenSharing = false;
 let audioContext;
-let localAudio; // Store reference to local audio element
+let localAudio;
+let isFullscreen = false;
 
 const configuration = {
     iceServers: [
@@ -87,7 +88,7 @@ async function setupAudio() {
         // Create muted local audio element to prevent echo
         localAudio = document.createElement('audio');
         localAudio.srcObject = localStream;
-        localAudio.muted = true; // CRITICAL: This prevents echo!
+        localAudio.muted = true;
         localAudio.autoplay = true;
         document.body.appendChild(localAudio);
         
@@ -106,7 +107,7 @@ async function setupAudio() {
     }
 }
 
-// Audio visualizer (optional)
+// Audio visualizer
 function setupAudioVisualizer() {
     if (!localStream) return;
     
@@ -158,6 +159,10 @@ async function toggleCall() {
         updateStatus('call-status', 'Call ended', '');
         document.getElementById('audio-visualizer').classList.remove('active');
         addSystemMessage('Call ended');
+        
+        // Remove remote audio
+        const remoteAudio = document.getElementById('remote-audio');
+        if (remoteAudio) remoteAudio.remove();
     } else {
         // Start call
         try {
@@ -180,12 +185,12 @@ async function toggleCall() {
 async function createPeerConnection() {
     peerConnection = new RTCPeerConnection(configuration);
     
-    // Add local audio tracks (these will be sent to remote user)
+    // Add local audio tracks
     localStream.getTracks().forEach(track => {
         peerConnection.addTrack(track, localStream);
     });
     
-    // Handle incoming audio (from remote user)
+    // Handle incoming audio
     peerConnection.ontrack = (event) => {
         console.log('🔊 Received remote audio');
         
@@ -195,7 +200,7 @@ async function createPeerConnection() {
         remoteAudio.autoplay = true;
         remoteAudio.volume = 1.0;
         remoteAudio.setAttribute('playsinline', true);
-        remoteAudio.muted = false; // This should NOT be muted!
+        remoteAudio.muted = false;
         
         // Add to DOM
         remoteAudio.id = 'remote-audio';
@@ -257,7 +262,7 @@ async function createPeerConnection() {
     }
 }
 
-// Toggle screen share (WITH AUDIO OPTION)
+// Toggle screen share
 async function toggleScreenShare() {
     const screenBtn = document.getElementById('screenBtn');
     
@@ -276,16 +281,15 @@ async function toggleScreenShare() {
         updateStatus('screen-status', '', '');
         addSystemMessage('Screen sharing stopped');
     } else {
-        // Start screen sharing WITH SYSTEM AUDIO
+        // Start screen sharing
         try {
-            // Set audio: true to include system audio (for videos, etc.)
             screenStream = await navigator.mediaDevices.getDisplayMedia({
                 video: {
                     width: { ideal: 3840 },
                     height: { ideal: 2160 },
                     frameRate: { ideal: 60 }
                 },
-                audio: true  // Set to true to share system audio
+                audio: true
             });
             
             screenBtn.classList.add('sharing');
@@ -344,11 +348,106 @@ async function createScreenPeerConnection() {
     });
 }
 
+// FULLSCREEN FUNCTIONS
+
+// Toggle fullscreen mode
+function toggleFullScreen() {
+    const container = document.getElementById('screen-container');
+    const fullscreenIcon = document.getElementById('fullscreenIcon');
+    
+    if (!isFullscreen) {
+        // Enter fullscreen
+        if (container.requestFullscreen) {
+            container.requestFullscreen();
+        } else if (container.webkitRequestFullscreen) {
+            container.webkitRequestFullscreen();
+        } else if (container.msRequestFullscreen) {
+            container.msRequestFullscreen();
+        }
+        
+        fullscreenIcon.textContent = '✕';
+        document.getElementById('fullscreenBtn').innerHTML = '<span id="fullscreenIcon">✕</span> Exit Fullscreen';
+        isFullscreen = true;
+        
+        // Show hint
+        showFullscreenHint('Press ESC to exit fullscreen');
+    } else {
+        // Exit fullscreen
+        if (document.exitFullscreen) {
+            document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+        } else if (document.msExitFullscreen) {
+            document.msExitFullscreen();
+        }
+        
+        fullscreenIcon.textContent = '⛶';
+        document.getElementById('fullscreenBtn').innerHTML = '<span id="fullscreenIcon">⛶</span> Fullscreen';
+        isFullscreen = false;
+    }
+}
+
+// Show fullscreen hint
+function showFullscreenHint(message) {
+    const hint = document.getElementById('fullscreen-hint');
+    hint.textContent = message;
+    hint.classList.add('show');
+    
+    setTimeout(() => {
+        hint.classList.remove('show');
+    }, 3000);
+}
+
+// Handle fullscreen change events
+document.addEventListener('fullscreenchange', handleFullscreenChange);
+document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+function handleFullscreenChange() {
+    const fullscreenIcon = document.getElementById('fullscreenIcon');
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+    
+    if (document.fullscreenElement || 
+        document.webkitFullscreenElement || 
+        document.mozFullScreenElement || 
+        document.msFullscreenElement) {
+        // Entered fullscreen
+        isFullscreen = true;
+        if (fullscreenIcon) {
+            fullscreenIcon.textContent = '✕';
+            fullscreenBtn.innerHTML = '<span id="fullscreenIcon">✕</span> Exit Fullscreen';
+        }
+    } else {
+        // Exited fullscreen
+        isFullscreen = false;
+        if (fullscreenIcon) {
+            fullscreenIcon.textContent = '⛶';
+            fullscreenBtn.innerHTML = '<span id="fullscreenIcon">⛶</span> Fullscreen';
+        }
+    }
+}
+
 // Close screen view
 function closeScreenView() {
+    // Exit fullscreen if active
+    if (isFullscreen) {
+        if (document.exitFullscreen) {
+            document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+        } else if (document.msExitFullscreen) {
+            document.msExitFullscreen();
+        }
+        isFullscreen = false;
+    }
+    
     document.getElementById('screen-container').classList.remove('active');
     const video = document.getElementById('remote-screen');
     video.srcObject = null;
+    
+    // Reset fullscreen button
+    document.getElementById('fullscreenBtn').innerHTML = '<span id="fullscreenIcon">⛶</span> Fullscreen';
 }
 
 // Update status badge
@@ -461,7 +560,9 @@ socket.on('screen-offer', async (data) => {
         document.getElementById('quality-indicator').classList.add('visible');
         updateStatus('screen-status', 'Viewing screen', 'connected');
         
-        // If screen includes audio, it will play automatically with video
+        // Show fullscreen hint
+        showFullscreenHint('⛶ Click Fullscreen for better view');
+        
         if (event.track.kind === 'audio') {
             console.log('🔊 Screen audio received');
         }
@@ -505,6 +606,23 @@ socket.on('screen-ice-candidate', async (data) => {
         }
     } catch (err) {
         console.error('Error adding screen ICE candidate:', err);
+    }
+});
+
+// Keyboard shortcut for fullscreen (F key)
+document.addEventListener('keydown', (e) => {
+    // Check if screen container is active and F key is pressed
+    if (e.key === 'f' || e.key === 'F') {
+        const screenContainer = document.getElementById('screen-container');
+        if (screenContainer.classList.contains('active')) {
+            toggleFullScreen();
+        }
+    }
+    
+    // ESC key to exit fullscreen
+    if (e.key === 'Escape' && isFullscreen) {
+        isFullscreen = false;
+        document.getElementById('fullscreenBtn').innerHTML = '<span id="fullscreenIcon">⛶</span> Fullscreen';
     }
 });
 
