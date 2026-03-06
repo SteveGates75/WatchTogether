@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>4K Screen Share - Optimized</title>
+    <title>4K Screen Share - Fixed</title>
     <style>
         * {
             margin: 0;
@@ -305,16 +305,6 @@
             animation: pulse 1.5s infinite;
         }
 
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
-        }
-
-        #bitrate-status {
-            background: #2a2a2a;
-        }
-
         #audio-visualizer {
             width: 100px;
             height: 30px;
@@ -361,10 +351,6 @@
             background: black;
         }
 
-        #screen-container:-moz-full-screen {
-            background: black;
-        }
-
         .video-wrapper {
             flex: 1;
             display: flex;
@@ -383,7 +369,6 @@
             height: auto;
             object-fit: contain;
             background: black;
-            box-shadow: 0 0 20px rgba(0,0,0,0.5);
         }
 
         .screen-controls {
@@ -506,7 +491,6 @@
             display: flex;
         }
 
-        /* Mobile responsiveness */
         @media (max-width: 768px) {
             .sidebar {
                 width: 60px;
@@ -527,15 +511,6 @@
             }
 
             .screen-controls button {
-                padding: 10px 20px;
-                font-size: 14px;
-            }
-
-            #status-container {
-                max-width: 300px;
-            }
-
-            #join-video-btn {
                 padding: 10px 20px;
                 font-size: 14px;
             }
@@ -571,7 +546,6 @@
         <div id="call-status" class="status-badge"></div>
         <div id="screen-status" class="status-badge"></div>
         <div id="video-status" class="status-badge"></div>
-        <div id="bitrate-status" class="status-badge">📊 0 Kbps</div>
         <div id="audio-visualizer" class="status-badge">
             <div class="visualizer-bar" id="visualizer-bar"></div>
         </div>
@@ -580,7 +554,7 @@
     <div id="screen-container">
         <div class="video-wrapper">
             <video id="remote-screen" autoplay playsinline></video>
-            <div class="quality-indicator" id="quality-indicator">📺 1080p 60fps</div>
+            <div class="quality-indicator" id="quality-indicator">📺 1080p</div>
             <div class="fullscreen-hint" id="fullscreen-hint">
                 ⬛ Click fullscreen for better view
             </div>

@@ -22,7 +22,6 @@ app.get('/health', (req, res) => {
 });
 
 const users = {};
-let roomUsers = [];
 let screenShareInfo = {
   active: false,
   sharer: null,
@@ -31,11 +30,6 @@ let screenShareInfo = {
 
 io.on('connection', (socket) => {
   console.log('New user connected:', socket.id);
-  console.log('Transport:', socket.conn.transport.name);
-
-  socket.conn.on('upgrade', (transport) => {
-    console.log('Transport upgraded to:', transport.name);
-  });
 
   socket.on('join', (username) => {
     users[socket.id] = {
@@ -68,20 +62,9 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('join-room', (roomId) => {
-    socket.join(roomId);
-    roomUsers.push(socket.id);
-    socket.to(roomId).emit('user-joined-room', socket.id);
-  });
-
-  socket.on('leave-room', (roomId) => {
-    socket.leave(roomId);
-    roomUsers = roomUsers.filter(id => id !== socket.id);
-    socket.to(roomId).emit('user-left-room', socket.id);
-  });
-
   // Screen sharing status
   socket.on('screen-sharing-started', (data) => {
+    console.log(`Screen sharing started by ${data.username}`);
     screenShareInfo = {
       active: true,
       sharer: socket.id,
@@ -91,6 +74,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('screen-sharing-stopped', () => {
+    console.log('Screen sharing stopped');
     screenShareInfo = {
       active: false,
       sharer: null,
@@ -99,11 +83,9 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('screen-sharing-stopped');
   });
 
-  // Handle request to join screen share
+  // Request to join screen share
   socket.on('request-screen-join', (data) => {
     console.log(`User ${socket.id} requesting to join screen from ${data.target}`);
-    
-    // Forward the offer to the screen sharer
     io.to(data.target).emit('screen-offer', {
       offer: data.offer,
       sender: socket.id
@@ -161,11 +143,10 @@ io.on('connection', (socket) => {
         user: user,
         message: `${user.username} left the chat`
       });
-      
       delete users[socket.id];
     }
     
-    // If screen sharer disconnects, notify everyone
+    // If screen sharer disconnects
     if (screenShareInfo.sharer === socket.id) {
       screenShareInfo = {
         active: false,
@@ -173,11 +154,6 @@ io.on('connection', (socket) => {
         sharerUsername: null
       };
       socket.broadcast.emit('screen-sharing-stopped');
-    }
-    
-    if (roomUsers.includes(socket.id)) {
-      roomUsers = roomUsers.filter(id => id !== socket.id);
-      io.to('main-room').emit('user-left-room', socket.id);
     }
     
     console.log('User disconnected:', socket.id);
