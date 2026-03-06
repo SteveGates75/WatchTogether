@@ -1,44 +1,24 @@
 // public/script.js
-const socket = io({
-    transports: ['websocket', 'polling']
-});
+const socket = io();
 
 let username = '';
-let localStream;
-let peerConnection;
-let screenPeerConnection;
-let currentRoom = 'main-room';
+let localStream = null;
+let peerConnection = null;
+let screenStream = null;
 let isCallActive = false;
 let isScreenSharing = false;
-let audioContext;
-let localAudio;
-let isFullscreen = false;
-let screenShareActive = false;
-let currentScreenSharer = null;
-let isViewingScreen = false;
-let pendingIceCandidates = [];
-let screenStream = null;
-
-// Audio constraints
-const audioConstraints = {
-    audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-    }
-};
+let currentCall = null;
+let screenSharer = null;
 
 const configuration = {
     iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
+        { urls: 'stun:stun.l.google.com:19302' }
     ]
 };
 
 // Login
 function login() {
-    username = document.getElementById('username-input').value.trim();
-    
+    username = document.getElementById('username').value.trim();
     if (!username) {
         alert('Please enter your name');
         return;
@@ -48,370 +28,331 @@ function login() {
     document.getElementById('app-container').style.display = 'flex';
     
     socket.emit('join', username);
+    addMessage('system', `You joined as ${username}`);
     
-    addSystemMessage(`You joined as ${username}`);
-    setupAudio();
-}
-
-// Setup audio
-async function setupAudio() {
-    try {
-        localStream = await navigator.mediaDevices.getUserMedia(audioConstraints);
-        console.log('✅ Microphone ready');
-        updateStatus('call-status', '🎤 Mic ready', 'connected');
-        
-        localAudio = document.createElement('audio');
-        localAudio.srcObject = localStream;
-        localAudio.muted = true;
-        localAudio.autoplay = true;
-        document.body.appendChild(localAudio);
-        
-    } catch (err) {
-        console.error('❌ Microphone error:', err);
-        updateStatus('call-status', '❌ Mic error', 'error');
-    }
+    // Get microphone
+    navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+            localStream = stream;
+            updateStatus('audio-status', 'Mic ready', 'connected');
+            console.log('Microphone ready');
+        })
+        .catch(err => {
+            console.error('Mic error:', err);
+            updateStatus('audio-status', 'Mic error', 'error');
+        });
 }
 
 // Send message
 function sendMessage() {
-    const input = document.getElementById('message-input');
+    const input = document.getElementById('messageInput');
     const message = input.value.trim();
-    
     if (message) {
         socket.emit('send-message', { message });
         input.value = '';
     }
 }
 
-// Toggle audio call
-async function toggleCall() {
-    const callBtn = document.getElementById('callBtn');
+// Add message to chat
+function addMessage(type, content, user = '', time = '') {
+    const messages = document.getElementById('messages');
+    const div = document.createElement('div');
+    div.className = 'message';
     
-    if (!localStream) return;
+    if (type === 'system') {
+        div.classList.add('system');
+        div.textContent = content;
+    } else {
+        div.innerHTML = `<strong>${user}</strong> ${content} <small>${time}</small>`;
+    }
+    
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+}
+
+// Update status badge
+function updateStatus(id, text, state) {
+    const el = document.getElementById(id);
+    el.textContent = text;
+    el.className = 'status-badge active';
+    if (state === 'connected') el.classList.add('connected');
+    if (state === 'connecting') el.classList.add('connecting');
+}
+
+// ============= AUDIO CALL =============
+
+async function toggleCall() {
+    const btn = document.getElementById('callBtn');
+    
+    if (!localStream) {
+        alert('Microphone not available');
+        return;
+    }
     
     if (isCallActive) {
+        // End call
         if (peerConnection) {
             peerConnection.close();
             peerConnection = null;
         }
         isCallActive = false;
-        callBtn.classList.remove('active');
-        updateStatus('call-status', 'Call ended', '');
+        btn.classList.remove('active');
+        updateStatus('audio-status', 'Call ended', 'connected');
+        addMessage('system', 'Call ended');
     } else {
+        // Start call
         try {
-            callBtn.classList.add('active');
-            updateStatus('call-status', 'Connecting...', 'connecting');
+            btn.classList.add('active');
+            updateStatus('audio-status', 'Connecting...', 'connecting');
             
             peerConnection = new RTCPeerConnection(configuration);
             
+            // Add local audio
             localStream.getTracks().forEach(track => {
                 peerConnection.addTrack(track, localStream);
             });
             
+            // Handle remote audio
             peerConnection.ontrack = (event) => {
-                const remoteAudio = new Audio();
-                remoteAudio.srcObject = event.streams[0];
-                remoteAudio.autoplay = true;
-                remoteAudio.id = 'remote-audio';
-                document.body.appendChild(remoteAudio);
-                updateStatus('call-status', 'Connected', 'connected');
+                const audio = new Audio();
+                audio.srcObject = event.streams[0];
+                audio.autoplay = true;
+                updateStatus('audio-status', 'Connected', 'connected');
+                addMessage('system', 'Connected to audio call');
             };
             
+            // ICE candidates
             peerConnection.onicecandidate = (event) => {
                 if (event.candidate) {
                     socket.emit('ice-candidate', {
                         candidate: event.candidate,
-                        target: currentRoom
+                        target: 'all'
                     });
                 }
             };
             
+            // Create offer
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
-            socket.emit('offer', { offer, target: currentRoom });
+            
+            socket.emit('offer', {
+                offer: offer,
+                target: 'all'
+            });
             
             isCallActive = true;
             
         } catch (err) {
             console.error('Call error:', err);
-            updateStatus('call-status', 'Call failed', 'error');
-            callBtn.classList.remove('active');
+            updateStatus('audio-status', 'Call failed', 'error');
+            btn.classList.remove('active');
         }
     }
 }
 
-// ============= SCREEN SHARING - FIXED =============
+// ============= SCREEN SHARE =============
 
-// Toggle screen share
-async function toggleScreenShare() {
-    const screenBtn = document.getElementById('screenBtn');
+async function toggleScreen() {
+    const btn = document.getElementById('screenBtn');
     
     if (isScreenSharing) {
-        stopScreenShare();
+        // Stop sharing
+        if (screenStream) {
+            screenStream.getTracks().forEach(track => track.stop());
+        }
+        if (peerConnection) {
+            peerConnection.close();
+            peerConnection = null;
+        }
+        isScreenSharing = false;
+        btn.classList.remove('sharing');
+        updateStatus('screen-status', '', '');
+        socket.emit('screen-stopped');
+        addMessage('system', 'You stopped sharing screen');
+        
     } else {
+        // Start sharing
         try {
             screenStream = await navigator.mediaDevices.getDisplayMedia({
                 video: true,
                 audio: true
             });
             
-            screenBtn.classList.add('sharing');
-            updateStatus('screen-status', 'Sharing screen', 'connected');
+            btn.classList.add('sharing');
+            updateStatus('screen-status', 'Sharing', 'connected');
             
-            // Create peer connection
-            screenPeerConnection = new RTCPeerConnection(configuration);
+            // Create connection
+            peerConnection = new RTCPeerConnection(configuration);
             
-            // Add tracks
+            // Add screen tracks
             screenStream.getTracks().forEach(track => {
-                screenPeerConnection.addTrack(track, screenStream);
+                peerConnection.addTrack(track, screenStream);
             });
             
-            // Handle ICE candidates
-            screenPeerConnection.onicecandidate = (event) => {
+            // ICE candidates
+            peerConnection.onicecandidate = (event) => {
                 if (event.candidate) {
                     socket.emit('screen-ice-candidate', {
                         candidate: event.candidate,
-                        target: currentRoom
+                        target: 'all'
                     });
                 }
             };
             
             // Create offer
-            const offer = await screenPeerConnection.createOffer();
-            await screenPeerConnection.setLocalDescription(offer);
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
             
-            // Notify everyone
-            socket.emit('screen-sharing-started', {
-                sharer: socket.id,
-                username: username,
-                offer: offer
+            socket.emit('screen-offer', {
+                offer: offer,
+                target: 'all'
             });
             
             isScreenSharing = true;
-            screenShareActive = true;
-            currentScreenSharer = socket.id;
+            screenSharer = socket.id;
             
-            addSystemMessage(`📺 You started sharing screen`);
+            // Notify others
+            socket.emit('screen-started');
+            addMessage('system', 'You are sharing screen');
             
             // Handle stop
             screenStream.getVideoTracks()[0].onended = () => {
-                stopScreenShare();
+                toggleScreen();
             };
             
         } catch (err) {
             console.error('Screen share error:', err);
-            screenBtn.classList.remove('sharing');
+            btn.classList.remove('sharing');
         }
     }
 }
 
-// Stop screen share
-function stopScreenShare() {
-    if (screenPeerConnection) {
-        screenPeerConnection.close();
-        screenPeerConnection = null;
-    }
+// Join screen share
+function joinScreen() {
+    if (!screenSharer || screenSharer === socket.id) return;
     
-    if (screenStream) {
-        screenStream.getTracks().forEach(track => track.stop());
-        screenStream = null;
-    }
+    addMessage('system', 'Connecting to screen share...');
     
-    isScreenSharing = false;
-    screenShareActive = false;
-    currentScreenSharer = null;
-    document.getElementById('screenBtn').classList.remove('sharing');
-    document.getElementById('joinVideoBtn').classList.remove('active');
-    updateStatus('screen-status', '', '');
+    // Create connection
+    peerConnection = new RTCPeerConnection(configuration);
     
-    socket.emit('screen-sharing-stopped');
-    addSystemMessage('Screen sharing stopped');
-}
-
-// Join video - FIXED
-async function joinVideo() {
-    if (!screenShareActive || !currentScreenSharer) {
-        addSystemMessage('❌ No active screen share');
-        return;
-    }
+    // Handle incoming video
+    peerConnection.ontrack = (event) => {
+        const video = document.getElementById('remote-video');
+        video.srcObject = event.streams[0];
+        document.getElementById('video-container').classList.add('active');
+        addMessage('system', 'Connected to screen share');
+    };
     
-    if (currentScreenSharer === socket.id) {
-        addSystemMessage('❌ You are sharing screen');
-        return;
-    }
-    
-    addSystemMessage('🔄 Connecting to video...');
-    updateStatus('video-status', 'Connecting...', 'connecting');
-    
-    try {
-        // Close old connection
-        if (screenPeerConnection) {
-            screenPeerConnection.close();
-            screenPeerConnection = null;
+    // ICE candidates
+    peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+            socket.emit('screen-ice-candidate', {
+                candidate: event.candidate,
+                target: screenSharer
+            });
         }
-        
-        pendingIceCandidates = [];
-        
-        // Create new connection
-        screenPeerConnection = new RTCPeerConnection(configuration);
-        
-        // Handle incoming video
-        screenPeerConnection.ontrack = (event) => {
-            const video = document.getElementById('remote-screen');
-            video.srcObject = event.streams[0];
-            document.getElementById('screen-container').classList.add('active');
-            
-            isViewingScreen = true;
-            updateStatus('screen-status', 'Viewing', 'connected');
-            updateStatus('video-status', 'Watching', 'connected');
-            
-            addSystemMessage('✅ Connected to video');
-            video.play().catch(() => {});
-        };
-        
-        // Handle ICE candidates
-        screenPeerConnection.onicecandidate = (event) => {
-            if (event.candidate) {
-                socket.emit('screen-ice-candidate', {
-                    candidate: event.candidate,
-                    target: currentScreenSharer
-                });
-            }
-        };
-        
-        // Create offer
-        const offer = await screenPeerConnection.createOffer({
-            offerToReceiveVideo: true,
-            offerToReceiveAudio: true
+    };
+    
+    // Create offer
+    peerConnection.createOffer({
+        offerToReceiveVideo: true,
+        offerToReceiveAudio: true
+    })
+    .then(offer => peerConnection.setLocalDescription(offer))
+    .then(() => {
+        socket.emit('screen-offer', {
+            offer: peerConnection.localDescription,
+            target: screenSharer
         });
-        
-        await screenPeerConnection.setLocalDescription(offer);
-        
-        // Send offer to sharer
-        socket.emit('request-screen-join', {
-            target: currentScreenSharer,
-            offer: offer
-        });
-        
-        // Timeout
-        setTimeout(() => {
-            if (!isViewingScreen) {
-                addSystemMessage('⏱️ Connection timeout');
-                updateStatus('video-status', 'Timeout', 'error');
-            }
-        }, 10000);
-        
-    } catch (err) {
-        console.error('Join error:', err);
-        addSystemMessage('❌ Failed to join');
-        updateStatus('video-status', 'Failed', 'error');
-    }
+    });
 }
 
 // Fullscreen
-function toggleFullScreen() {
-    const container = document.getElementById('screen-container');
-    
-    if (!isFullscreen) {
-        if (container.requestFullscreen) {
-            container.requestFullscreen();
-        } else if (container.webkitRequestFullscreen) {
-            container.webkitRequestFullscreen();
-        }
-        isFullscreen = true;
+function toggleFullscreen() {
+    const container = document.getElementById('video-container');
+    if (!document.fullscreenElement) {
+        container.requestFullscreen();
     } else {
-        if (document.exitFullscreen) {
-            document.exitFullscreen();
-        } else if (document.webkitExitFullscreen) {
-            document.webkitExitFullscreen();
-        }
-        isFullscreen = false;
+        document.exitFullscreen();
     }
 }
 
-// Close screen
-function closeScreenView() {
-    if (isFullscreen) {
-        if (document.exitFullscreen) {
-            document.exitFullscreen();
-        } else if (document.webkitExitFullscreen) {
-            document.webkitExitFullscreen();
-        }
-        isFullscreen = false;
-    }
-    
-    document.getElementById('screen-container').classList.remove('active');
-    document.getElementById('remote-screen').srcObject = null;
-    isViewingScreen = false;
-    updateStatus('video-status', '', '');
-}
-
-// Update status
-function updateStatus(id, text, className) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.textContent = text;
-    el.className = 'status-badge';
-    if (className) el.classList.add('active', className);
-}
-
-// Add message
-function addSystemMessage(msg) {
-    const div = document.getElementById('messages');
-    const el = document.createElement('div');
-    el.className = 'message system';
-    el.textContent = msg;
-    div.appendChild(el);
-    div.scrollTop = div.scrollHeight;
+// Close video
+function closeVideo() {
+    document.getElementById('video-container').classList.remove('active');
+    document.getElementById('remote-video').srcObject = null;
 }
 
 // ============= SOCKET HANDLERS =============
 
-socket.on('connect', () => console.log('✅ Connected'));
-
+// Messages
 socket.on('new-message', (data) => {
-    const div = document.getElementById('messages');
-    const el = document.createElement('div');
-    el.className = 'message';
-    el.innerHTML = `<strong>${data.user}</strong> ${data.message} <small>${data.time}</small>`;
-    div.appendChild(el);
-    div.scrollTop = div.scrollHeight;
+    addMessage('message', data.message, data.user, data.time);
 });
 
-socket.on('user-joined', (data) => addSystemMessage(data.message));
-socket.on('user-left', (data) => addSystemMessage(data.message));
+socket.on('user-joined', (msg) => addMessage('system', msg));
+socket.on('user-left', (msg) => addMessage('system', msg));
 
-// Screen sharing started
-socket.on('screen-sharing-started', (data) => {
-    screenShareActive = true;
-    currentScreenSharer = data.sharer;
-    document.getElementById('joinVideoBtn').classList.add('active');
+// Audio signaling
+socket.on('offer', async (data) => {
+    if (data.sender === socket.id) return;
     
-    const div = document.getElementById('messages');
-    const el = document.createElement('div');
-    el.className = 'message video-offer';
-    el.innerHTML = `<strong>📺 ${data.username}</strong> sharing screen <button class="join-btn" onclick="joinVideo()">Join</button>`;
-    div.appendChild(el);
-    div.scrollTop = div.scrollHeight;
-    
-    addSystemMessage(`📺 ${data.username} is sharing screen`);
-});
-
-socket.on('screen-sharing-stopped', () => {
-    screenShareActive = false;
-    currentScreenSharer = null;
-    document.getElementById('joinVideoBtn').classList.remove('active');
-    if (document.getElementById('screen-container').classList.contains('active')) {
-        closeScreenView();
+    if (!peerConnection) {
+        peerConnection = new RTCPeerConnection(configuration);
+        
+        if (localStream) {
+            localStream.getTracks().forEach(track => {
+                peerConnection.addTrack(track, localStream);
+            });
+        }
+        
+        peerConnection.ontrack = (event) => {
+            const audio = new Audio();
+            audio.srcObject = event.streams[0];
+            audio.autoplay = true;
+        };
+        
+        peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+                socket.emit('ice-candidate', {
+                    candidate: event.candidate,
+                    target: data.sender
+                });
+            }
+        };
     }
-    addSystemMessage('📺 Screen sharing ended');
+    
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    
+    socket.emit('answer', {
+        answer: answer,
+        target: data.sender
+    });
 });
 
-// Handle screen offer (for sharer)
-socket.on('screen-offer', async (data) => {
-    if (!isScreenSharing || !screenStream) return;
-    
+socket.on('answer', async (data) => {
+    if (!peerConnection) return;
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+});
+
+socket.on('ice-candidate', async (data) => {
+    if (!peerConnection) return;
     try {
+        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+    } catch (err) {
+        console.error('Error adding ICE candidate:', err);
+    }
+});
+
+// Screen signaling
+socket.on('screen-offer', async (data) => {
+    if (data.sender === socket.id) return;
+    
+    // If we're the sharer
+    if (isScreenSharing) {
         const pc = new RTCPeerConnection(configuration);
         
         screenStream.getTracks().forEach(track => {
@@ -435,98 +376,38 @@ socket.on('screen-offer', async (data) => {
             answer: answer,
             target: data.sender
         });
-        
-        if (!screenPeerConnection) {
-            screenPeerConnection = pc;
-        }
-        
-    } catch (err) {
-        console.error('Error handling offer:', err);
     }
 });
 
-// Handle screen answer (for viewer)
 socket.on('screen-answer', async (data) => {
-    if (!screenPeerConnection) return;
-    
-    try {
-        await screenPeerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-        
-        while (pendingIceCandidates.length) {
-            await screenPeerConnection.addIceCandidate(new RTCIceCandidate(pendingIceCandidates.shift()));
-        }
-        
-    } catch (err) {
-        console.error('Error handling answer:', err);
-    }
+    if (!peerConnection) return;
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
 });
 
-// Handle ICE candidates
 socket.on('screen-ice-candidate', async (data) => {
-    if (!screenPeerConnection) {
-        pendingIceCandidates.push(data.candidate);
-        return;
-    }
-    
-    try {
-        if (screenPeerConnection.remoteDescription) {
-            await screenPeerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-        } else {
-            pendingIceCandidates.push(data.candidate);
-        }
-    } catch (err) {
-        console.error('Error adding ICE candidate:', err);
-    }
-});
-
-// Audio signaling
-socket.on('offer', async (data) => {
-    if (!peerConnection) return;
-    try {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-        const answer = await peerConnection.createAnswer();
-        await peerConnection.setLocalDescription(answer);
-        socket.emit('answer', { answer, target: data.sender });
-    } catch (err) {
-        console.error('Error handling offer:', err);
-    }
-});
-
-socket.on('answer', async (data) => {
-    if (!peerConnection) return;
-    try {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-    } catch (err) {
-        console.error('Error handling answer:', err);
-    }
-});
-
-socket.on('ice-candidate', async (data) => {
     if (!peerConnection) return;
     try {
         await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
     } catch (err) {
-        console.error('Error adding ICE candidate:', err);
+        console.error('Error adding screen ICE candidate:', err);
     }
 });
 
-// Keyboard shortcut
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'f' && document.getElementById('screen-container').classList.contains('active')) {
-        toggleFullScreen();
-    }
+// Screen availability
+socket.on('screen-available', (data) => {
+    screenSharer = data.sharer;
+    document.getElementById('join-btn').classList.add('active');
+    addMessage('system', `📺 ${data.username} is sharing screen. Click "Join Screen Share" to watch.`);
 });
 
-// Clean up
-window.addEventListener('beforeunload', () => {
-    if (localAudio) localAudio.remove();
-    if (peerConnection) peerConnection.close();
-    if (screenPeerConnection) screenPeerConnection.close();
-    if (localStream) localStream.getTracks().forEach(t => t.stop());
-    if (screenStream) screenStream.getTracks().forEach(t => t.stop());
+socket.on('screen-unavailable', () => {
+    screenSharer = null;
+    document.getElementById('join-btn').classList.remove('active');
+    closeVideo();
+    addMessage('system', '📺 Screen sharing ended');
 });
 
-// Initialize chat input
-document.getElementById('message-input').addEventListener('keypress', (e) => {
+// Enter key for messages
+document.getElementById('messageInput').addEventListener('keypress', (e) => {
     if (e.key === 'Enter') sendMessage();
 });
