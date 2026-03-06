@@ -11,7 +11,7 @@ const io = socketIo(server, {
     origin: "*",
     methods: ["GET", "POST"]
   },
-  transports: ['websocket', 'polling'] // Important for Render
+  transports: ['websocket', 'polling']
 });
 
 app.use(cors());

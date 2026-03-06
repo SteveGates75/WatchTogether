@@ -271,6 +271,26 @@
             background: #2a2a2a;
         }
 
+        #audio-visualizer {
+            width: 100px;
+            height: 30px;
+            background: #2a2a2a;
+            border-radius: 15px;
+            overflow: hidden;
+            display: none;
+        }
+
+        #audio-visualizer.active {
+            display: block;
+        }
+
+        .visualizer-bar {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #3ba55d, #5865f2);
+            transition: width 0.1s;
+        }
+
         #screen-container {
             position: fixed;
             top: 0;
@@ -383,6 +403,9 @@
         <div id="call-status" class="status-badge"></div>
         <div id="screen-status" class="status-badge"></div>
         <div id="bitrate-status" class="status-badge">📊 0 Kbps</div>
+        <div id="audio-visualizer" class="status-badge">
+            <div class="visualizer-bar" id="visualizer-bar"></div>
+        </div>
     </div>
 
     <div id="screen-container">

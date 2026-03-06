@@ -10,6 +10,8 @@ let screenPeerConnection;
 let currentRoom = 'main-room';
 let isCallActive = false;
 let isScreenSharing = false;
+let audioContext;
+let localAudio; // Store reference to local audio element
 
 const configuration = {
     iceServers: [
@@ -64,18 +66,34 @@ function sendMessage() {
     }
 }
 
-// Setup audio
+// Setup audio with echo cancellation
 async function setupAudio() {
     try {
         localStream = await navigator.mediaDevices.getUserMedia({ 
             audio: {
                 echoCancellation: true,
                 noiseSuppression: true,
-                autoGainControl: true
+                autoGainControl: true,
+                latency: 0,
+                channelCount: 1,
+                sampleRate: 48000,
+                sampleSize: 16
             }
         });
+        
         console.log('✅ Microphone access granted');
         updateStatus('call-status', '🎤 Mic ready', 'connected');
+        
+        // Create muted local audio element to prevent echo
+        localAudio = document.createElement('audio');
+        localAudio.srcObject = localStream;
+        localAudio.muted = true; // CRITICAL: This prevents echo!
+        localAudio.autoplay = true;
+        document.body.appendChild(localAudio);
+        
+        // Optional: Visualize audio levels
+        setupAudioVisualizer();
+        
     } catch (err) {
         console.error('❌ Microphone error:', err);
         updateStatus('call-status', '❌ Mic blocked', 'error');
@@ -86,6 +104,38 @@ async function setupAudio() {
             alert('No microphone found. Please connect a microphone.');
         }
     }
+}
+
+// Audio visualizer (optional)
+function setupAudioVisualizer() {
+    if (!localStream) return;
+    
+    audioContext = new AudioContext();
+    const source = audioContext.createMediaStreamSource(localStream);
+    const analyzer = audioContext.createAnalyser();
+    analyzer.fftSize = 256;
+    
+    source.connect(analyzer);
+    
+    const dataArray = new Uint8Array(analyzer.frequencyBinCount);
+    
+    function updateVisualizer() {
+        if (!isCallActive) return;
+        
+        analyzer.getByteFrequencyData(dataArray);
+        const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+        const percentage = (average / 255) * 100;
+        
+        const visualizer = document.getElementById('visualizer-bar');
+        if (visualizer) {
+            visualizer.style.width = percentage + '%';
+        }
+        
+        requestAnimationFrame(updateVisualizer);
+    }
+    
+    document.getElementById('audio-visualizer').classList.add('active');
+    updateVisualizer();
 }
 
 // Toggle audio call
@@ -106,6 +156,7 @@ async function toggleCall() {
         isCallActive = false;
         callBtn.classList.remove('active');
         updateStatus('call-status', 'Call ended', '');
+        document.getElementById('audio-visualizer').classList.remove('active');
         addSystemMessage('Call ended');
     } else {
         // Start call
@@ -129,17 +180,28 @@ async function toggleCall() {
 async function createPeerConnection() {
     peerConnection = new RTCPeerConnection(configuration);
     
-    // Add local audio tracks
+    // Add local audio tracks (these will be sent to remote user)
     localStream.getTracks().forEach(track => {
         peerConnection.addTrack(track, localStream);
     });
     
-    // Handle incoming audio
+    // Handle incoming audio (from remote user)
     peerConnection.ontrack = (event) => {
+        console.log('🔊 Received remote audio');
+        
+        // Create audio element for remote stream
         const remoteAudio = new Audio();
         remoteAudio.srcObject = event.streams[0];
         remoteAudio.autoplay = true;
         remoteAudio.volume = 1.0;
+        remoteAudio.setAttribute('playsinline', true);
+        remoteAudio.muted = false; // This should NOT be muted!
+        
+        // Add to DOM
+        remoteAudio.id = 'remote-audio';
+        const existing = document.getElementById('remote-audio');
+        if (existing) existing.remove();
+        document.body.appendChild(remoteAudio);
         
         updateStatus('call-status', 'Connected', 'connected');
         addSystemMessage('🔊 Connected to remote audio');
@@ -167,6 +229,10 @@ async function createPeerConnection() {
             document.getElementById('callBtn').classList.remove('active');
             updateStatus('call-status', 'Disconnected', 'error');
             addSystemMessage('Call disconnected');
+            
+            // Remove remote audio
+            const remoteAudio = document.getElementById('remote-audio');
+            if (remoteAudio) remoteAudio.remove();
         }
     };
     
@@ -191,7 +257,7 @@ async function createPeerConnection() {
     }
 }
 
-// Toggle screen share
+// Toggle screen share (WITH AUDIO OPTION)
 async function toggleScreenShare() {
     const screenBtn = document.getElementById('screenBtn');
     
@@ -210,15 +276,16 @@ async function toggleScreenShare() {
         updateStatus('screen-status', '', '');
         addSystemMessage('Screen sharing stopped');
     } else {
-        // Start screen sharing
+        // Start screen sharing WITH SYSTEM AUDIO
         try {
+            // Set audio: true to include system audio (for videos, etc.)
             screenStream = await navigator.mediaDevices.getDisplayMedia({
                 video: {
                     width: { ideal: 3840 },
                     height: { ideal: 2160 },
                     frameRate: { ideal: 60 }
                 },
-                audio: false
+                audio: true  // Set to true to share system audio
             });
             
             screenBtn.classList.add('sharing');
@@ -248,7 +315,7 @@ async function toggleScreenShare() {
 async function createScreenPeerConnection() {
     screenPeerConnection = new RTCPeerConnection(configuration);
     
-    // Add screen video track
+    // Add screen video track (and audio if available)
     screenStream.getTracks().forEach(track => {
         screenPeerConnection.addTrack(track, screenStream);
     });
@@ -393,6 +460,11 @@ socket.on('screen-offer', async (data) => {
         document.getElementById('screen-container').classList.add('active');
         document.getElementById('quality-indicator').classList.add('visible');
         updateStatus('screen-status', 'Viewing screen', 'connected');
+        
+        // If screen includes audio, it will play automatically with video
+        if (event.track.kind === 'audio') {
+            console.log('🔊 Screen audio received');
+        }
     };
     
     screenPeerConnection.onicecandidate = (event) => {
@@ -433,5 +505,24 @@ socket.on('screen-ice-candidate', async (data) => {
         }
     } catch (err) {
         console.error('Error adding screen ICE candidate:', err);
+    }
+});
+
+// Clean up on page unload
+window.addEventListener('beforeunload', () => {
+    if (localAudio) {
+        localAudio.remove();
+    }
+    if (peerConnection) {
+        peerConnection.close();
+    }
+    if (screenPeerConnection) {
+        screenPeerConnection.close();
+    }
+    if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+    }
+    if (screenStream) {
+        screenStream.getTracks().forEach(track => track.stop());
     }
 });
