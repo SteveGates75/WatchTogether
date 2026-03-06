@@ -1,7 +1,7 @@
 {
   "name": "4k-screenshare",
   "version": "1.0.0",
-  "description": "4K Screen Share with Audio Chat",
+  "description": "4K Screen Share with High-Quality Audio",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

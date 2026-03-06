@@ -23,6 +23,11 @@ app.get('/health', (req, res) => {
 
 const users = {};
 let roomUsers = [];
+let screenShareInfo = {
+  active: false,
+  sharer: null,
+  sharerUsername: null
+};
 
 io.on('connection', (socket) => {
   console.log('New user connected:', socket.id);
@@ -42,6 +47,14 @@ io.on('connection', (socket) => {
       user: users[socket.id],
       message: `${username} joined the chat`
     });
+
+    // Send current screen share status to new user
+    if (screenShareInfo.active) {
+      socket.emit('screen-sharing-started', {
+        sharer: screenShareInfo.sharer,
+        username: screenShareInfo.sharerUsername
+      });
+    }
   });
 
   socket.on('send-message', (data) => {
@@ -65,6 +78,32 @@ io.on('connection', (socket) => {
     socket.leave(roomId);
     roomUsers = roomUsers.filter(id => id !== socket.id);
     socket.to(roomId).emit('user-left-room', socket.id);
+  });
+
+  // Screen sharing status
+  socket.on('screen-sharing-started', (data) => {
+    screenShareInfo = {
+      active: true,
+      sharer: socket.id,
+      sharerUsername: data.username
+    };
+    socket.broadcast.emit('screen-sharing-started', data);
+  });
+
+  socket.on('screen-sharing-stopped', () => {
+    screenShareInfo = {
+      active: false,
+      sharer: null,
+      sharerUsername: null
+    };
+    socket.broadcast.emit('screen-sharing-stopped');
+  });
+
+  socket.on('request-screen-join', (data) => {
+    // Forward request to the screen sharer
+    io.to(data.target).emit('request-screen-join', {
+      requester: socket.id
+    });
   });
 
   // WebRTC signaling
@@ -120,6 +159,16 @@ io.on('connection', (socket) => {
       });
       
       delete users[socket.id];
+    }
+    
+    // If screen sharer disconnects, notify everyone
+    if (screenShareInfo.sharer === socket.id) {
+      screenShareInfo = {
+        active: false,
+        sharer: null,
+        sharerUsername: null
+      };
+      socket.broadcast.emit('screen-sharing-stopped');
     }
     
     if (roomUsers.includes(socket.id)) {
