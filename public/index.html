@@ -3,77 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Video Call & Screen Share</title>
+    <title>Simple Video Call</title>
     <style>
-        * { margin:0; padding:0; box-sizing:border-box; }
-        body { font-family: system-ui; background:#0a0a0a; color:white; height:100vh; display:flex; flex-direction:column; }
-        #login-container { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:#1a1a1a; padding:2rem; border-radius:12px; text-align:center; width:90%; max-width:350px; }
-        #login-container h2 { margin-bottom:1.5rem; color:#5865f2; }
-        #login-container input { width:100%; padding:0.8rem; margin-bottom:1rem; border:none; border-radius:6px; background:#2a2a2a; color:white; font-size:1rem; }
-        #login-container button { width:100%; padding:0.8rem; background:#5865f2; border:none; border-radius:6px; color:white; font-size:1rem; font-weight:bold; cursor:pointer; }
-        #app-container { display:none; flex:1; flex-direction:column; }
-        #status-bar { display:flex; justify-content:space-between; padding:0.5rem 1rem; background:#1a1a1a; font-size:0.9rem; }
-        .status-badge { background:#2a2a2a; padding:0.2rem 0.8rem; border-radius:20px; }
-        .status-badge.connected { background:#3ba55d; }
-        .status-badge.connecting { background:#faa81a; color:black; }
-        .main-area { display:flex; flex:1; overflow:hidden; }
-        .video-section { flex:2; display:flex; flex-direction:column; padding:1rem; gap:1rem; }
-        .video-row { display:flex; gap:1rem; flex-wrap:wrap; }
-        .video-box { background:#1a1a1a; border-radius:10px; overflow:hidden; position:relative; min-width:200px; flex:1; aspect-ratio:4/3; }
-        .video-box video { width:100%; height:100%; object-fit:cover; background:#2a2a2a; }
-        .video-label { position:absolute; bottom:5px; left:5px; background:rgba(0,0,0,0.6); padding:0.2rem 0.5rem; border-radius:4px; font-size:0.8rem; }
-        .chat-section { flex:1; display:flex; flex-direction:column; background:#1a1a1a; padding:1rem; max-width:300px; }
-        #messages { flex:1; overflow-y:auto; margin-bottom:1rem; background:#2a2a2a; border-radius:8px; padding:0.5rem; }
-        .message { margin-bottom:0.5rem; padding:0.4rem; background:#3a3a3a; border-radius:5px; font-size:0.9rem; }
-        .message.system { background:#2a2a2a; color:#aaa; font-style:italic; text-align:center; }
-        .message-input { display:flex; gap:0.5rem; }
-        .message-input input { flex:1; padding:0.5rem; border:none; border-radius:5px; background:#3a3a3a; color:white; }
-        .message-input button { padding:0.5rem 1rem; background:#5865f2; border:none; border-radius:5px; color:white; cursor:pointer; }
-        .controls { display:flex; justify-content:center; gap:1rem; padding:1rem; background:#1a1a1a; flex-wrap:wrap; }
-        .controls button { padding:0.8rem 1.5rem; border:none; border-radius:30px; font-size:1rem; font-weight:bold; cursor:pointer; background:#2a2a2a; color:white; }
-        .controls button.active { background:#ed4245; }
-        .controls button.sharing { background:#3ba55d; }
-        #join-screen-btn { position:fixed; bottom:80px; right:20px; background:#5865f2; color:white; border:none; border-radius:30px; padding:0.8rem 1.5rem; font-size:1rem; font-weight:bold; display:none; cursor:pointer; z-index:100; }
-        #fullscreen-video { position:fixed; top:0; left:0; width:100%; height:100%; background:black; z-index:2000; display:none; flex-direction:column; }
-        #fullscreen-video video { flex:1; width:100%; object-fit:contain; }
-        .fullscreen-controls { position:absolute; bottom:20px; right:20px; }
-        .fullscreen-controls button { padding:0.5rem 1rem; border:none; border-radius:5px; font-weight:bold; cursor:pointer; }
-        @media (max-width:768px) { .main-area { flex-direction:column; } .chat-section { max-width:100%; } }
+        body { margin:0; background:#111; color:white; font-family:sans-serif; }
+        #login { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:#222; padding:20px; border-radius:8px; }
+        #login input, #login button { padding:10px; margin:5px; }
+        #app { display:none; height:100vh; }
+        #videos { display:flex; justify-content:center; gap:10px; padding:10px; }
+        video { width:45%; max-width:400px; background:#333; border-radius:8px; }
+        #controls { text-align:center; padding:10px; }
+        button { padding:10px 20px; margin:5px; background:#4CAF50; color:white; border:none; border-radius:5px; cursor:pointer; }
+        button.hangup { background:#f44336; }
+        #status { text-align:center; color:#aaa; }
     </style>
 </head>
 <body>
-    <div id="login-container">
-        <h2>🎥 Video Call & Screen Share</h2>
-        <input type="text" id="username" placeholder="Your name">
+    <div id="login">
+        <h3>Enter your name</h3>
+        <input type="text" id="username" placeholder="Name">
         <button onclick="login()">Join</button>
     </div>
-    <div id="app-container">
-        <div id="status-bar">
-            <span id="device-status" class="status-badge">Initializing...</span>
-            <span id="call-status" class="status-badge"></span>
-            <span id="screen-status" class="status-badge"></span>
+
+    <div id="app">
+        <div id="videos">
+            <video id="localVideo" autoplay playsinline muted></video>
+            <video id="remoteVideo" autoplay playsinline></video>
         </div>
-        <div class="main-area">
-            <div class="video-section">
-                <div class="video-row">
-                    <div class="video-box"><video id="local-video" autoplay playsinline muted></video><span class="video-label">You</span></div>
-                    <div class="video-box"><video id="remote-video" autoplay playsinline></video><span class="video-label">Remote</span></div>
-                </div>
-                <div id="screen-share-box" class="video-box" style="display:none;"><video id="screen-video" autoplay playsinline></video><span class="video-label">Screen Share</span></div>
-            </div>
-            <div class="chat-section">
-                <div id="messages"></div>
-                <div class="message-input"><input id="message-input" placeholder="Message..."><button onclick="sendMessage()">Send</button></div>
-            </div>
+        <div id="controls">
+            <button id="callBtn" onclick="startCall()">📞 Start Video Call</button>
+            <button class="hangup" onclick="hangUp()">📴 Hang Up</button>
         </div>
-        <div class="controls">
-            <button id="video-call-btn" onclick="toggleVideoCall()">📹 Video Call</button>
-            <button id="audio-call-btn" onclick="toggleAudioCall()">🎧 Audio Call</button>
-            <button id="screen-share-btn" onclick="toggleScreenShare()">📺 Share Screen</button>
-        </div>
+        <div id="status">Not connected</div>
     </div>
-    <button id="join-screen-btn" onclick="joinScreenShare()">📱 Join Screen Share</button>
-    <div id="fullscreen-video"><video id="fullscreen-video-player" autoplay playsinline></video><div class="fullscreen-controls"><button onclick="exitFullscreen()">Exit</button></div></div>
+
     <script src="/socket.io/socket.io.js"></script>
     <script src="script.js"></script>
 </body>
