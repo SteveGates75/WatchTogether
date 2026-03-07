@@ -38,7 +38,6 @@ io.on('connection', (socket) => {
   });
 
   // ---------- Video/Audio Call Signaling ----------
-  // Offer -> broadcast to everyone except sender
   socket.on('offer', (data) => {
     socket.broadcast.emit('offer', {
       offer: data.offer,
@@ -46,7 +45,6 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Answer -> send directly to the caller
   socket.on('answer', (data) => {
     io.to(data.to).emit('answer', {
       answer: data.answer,
@@ -54,7 +52,6 @@ io.on('connection', (socket) => {
     });
   });
 
-  // ICE candidate -> send directly to the target
   socket.on('ice-candidate', (data) => {
     io.to(data.to).emit('ice-candidate', {
       candidate: data.candidate,

@@ -1,27 +1,26 @@
-// ==================== CONFIG ====================
+// ==================== GLOBALS ====================
 const socket = io();
 let username = '';
 let localStream = null;
-let pc = null;           // for audio/video calls
-let screenPC = null;     // for screen share
+let pc = null;           // main peer connection for audio/video calls
+let screenPC = null;     // separate peer connection for screen share
 let screenSharerId = null;
-let isVideoCallActive = false;
-let isAudioCallActive = false;
-let isScreenSharing = false;
+let callActive = false;  // true if any call (audio or video) is active
+let callType = null;     // 'audio' or 'video'
+let screenShareActive = false;
 
-// Multiple STUN servers for faster ICE gathering
-const iceServers = [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    { urls: 'stun:stun4.l.google.com:19302' },
-    { urls: 'stun:stun.ekiga.net' },
-    { urls: 'stun:stun.ideasip.com' }
-];
-const config = { iceServers };
+// ICE servers for faster connectivity
+const iceServers = {
+    iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' }
+    ]
+};
 
-// ==================== UTILS ====================
+// ==================== UTILITY FUNCTIONS ====================
 function addSystemMessage(msg) {
     const div = document.getElementById('messages');
     const el = document.createElement('div');
@@ -78,49 +77,59 @@ function sendMessage() {
     input.value = '';
 }
 
-// ==================== PEER CONNECTION FACTORY ====================
+// ==================== PEER CONNECTION MANAGEMENT ====================
 function createPeerConnection(isScreen = false) {
-    const pc = new RTCPeerConnection(config);
+    const pc = new RTCPeerConnection(iceServers);
 
-    // Add local tracks if we have a stream and it's not screen share (screen tracks added separately)
-    if (localStream && !isScreen) {
+    // Add local tracks if we have a stream and it's not a screen share (screen tracks added separately)
+    if (localStream && !isScreen && callActive) {
         localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     }
 
+    // Handle incoming tracks
     pc.ontrack = (event) => {
         console.log('Received track:', event.track.kind);
         if (isScreen) {
             const screenVideo = document.getElementById('screen-video');
             screenVideo.srcObject = event.streams[0];
             document.getElementById('screen-share-box').style.display = 'block';
+            updateStatus('screen-status', 'Viewing', 'connected');
         } else {
+            // For audio/video calls
             const remoteVideo = document.getElementById('remote-video');
             remoteVideo.srcObject = event.streams[0];
+            // If it's an audio-only call, we still show the video element (it will be black, but audio plays)
+            // To ensure audio plays even if video element is hidden, we also create an audio element.
+            if (callType === 'audio' && event.track.kind === 'audio') {
+                // For audio-only, create a separate Audio element to guarantee playback
+                const audio = new Audio();
+                audio.srcObject = event.streams[0];
+                audio.autoplay = true;
+                audio.play().catch(e => console.warn('Audio play failed:', e));
+            }
+            updateStatus('call-status', 'Connected', 'connected');
+            addSystemMessage('Call connected');
         }
     };
 
+    // Handle ICE candidates
     pc.onicecandidate = (event) => {
         if (event.candidate) {
             if (isScreen) {
-                socket.emit('screen-ice-candidate', { candidate: event.candidate, to: 'all' });
+                socket.emit('screen-ice-candidate', { candidate: event.candidate, to: screenSharerId || 'all' });
             } else {
+                // For regular calls, we need to know the target. We'll store the remote peer ID.
+                // For simplicity, we broadcast ICE candidates and let the client ignore its own.
                 socket.emit('ice-candidate', { candidate: event.candidate, to: 'all' });
             }
         }
     };
 
-    // Log connection state for debugging
     pc.oniceconnectionstatechange = () => {
-        console.log('ICE state:', pc.iceConnectionState);
-        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-            if (!isScreen) {
-                updateStatus('call-status', 'Connected', 'connected');
-            }
-        } else if (pc.iceConnectionState === 'failed') {
-            console.error('ICE failed');
-            if (!isScreen) {
-                updateStatus('call-status', 'Failed', 'error');
-            }
+        console.log('ICE connection state:', pc.iceConnectionState);
+        if (pc.iceConnectionState === 'failed') {
+            console.error('ICE failed, restarting...');
+            pc.restartIce();
         }
     };
 
@@ -129,14 +138,15 @@ function createPeerConnection(isScreen = false) {
 
 // ==================== VIDEO CALL ====================
 async function toggleVideoCall() {
-    if (!localStream) return alert('No camera/mic');
+    if (!localStream) return alert('Camera/mic not available');
     const btn = document.getElementById('video-call-btn');
 
-    if (isVideoCallActive) {
+    if (callActive && callType === 'video') {
         // End call
         if (pc) pc.close();
         pc = null;
-        isVideoCallActive = false;
+        callActive = false;
+        callType = null;
         btn.classList.remove('active');
         document.getElementById('remote-video').srcObject = null;
         updateStatus('call-status', 'Call ended', '');
@@ -144,12 +154,14 @@ async function toggleVideoCall() {
         return;
     }
 
-    // If audio call active, end it first
-    if (isAudioCallActive) {
+    // If another call type is active, close it first
+    if (callActive) {
         if (pc) pc.close();
         pc = null;
-        isAudioCallActive = false;
         document.getElementById('audio-call-btn').classList.remove('active');
+        document.getElementById('video-call-btn').classList.remove('active');
+        document.getElementById('remote-video').srcObject = null;
+        callActive = false;
     }
 
     try {
@@ -157,41 +169,52 @@ async function toggleVideoCall() {
         updateStatus('call-status', 'Connecting...', 'connecting');
         addSystemMessage('Starting video call...');
 
+        callType = 'video';
+        callActive = true;
         pc = createPeerConnection(false);
+
+        // Add local tracks (we already added them in createPeerConnection if callActive true, but ensure)
+        // Actually createPeerConnection adds tracks only if callActive && localStream. So after setting callActive true, we need to add them.
+        // Let's add them explicitly after pc creation.
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
         // Broadcast offer
         socket.emit('offer', { offer, to: 'all' });
-
-        isVideoCallActive = true;
     } catch (err) {
         console.error('Video call error:', err);
         updateStatus('call-status', 'Failed', 'error');
         btn.classList.remove('active');
+        callActive = false;
+        callType = null;
     }
 }
 
 // ==================== AUDIO CALL ====================
 async function toggleAudioCall() {
-    if (!localStream) return alert('No microphone');
+    if (!localStream) return alert('Microphone not available');
     const btn = document.getElementById('audio-call-btn');
 
-    if (isAudioCallActive) {
+    if (callActive && callType === 'audio') {
         if (pc) pc.close();
         pc = null;
-        isAudioCallActive = false;
+        callActive = false;
+        callType = null;
         btn.classList.remove('active');
         updateStatus('call-status', 'Call ended', '');
         addSystemMessage('Audio call ended');
         return;
     }
 
-    if (isVideoCallActive) {
+    if (callActive) {
         if (pc) pc.close();
         pc = null;
-        isVideoCallActive = false;
         document.getElementById('video-call-btn').classList.remove('active');
+        document.getElementById('audio-call-btn').classList.remove('active');
+        document.getElementById('remote-video').srcObject = null;
+        callActive = false;
     }
 
     try {
@@ -199,17 +222,23 @@ async function toggleAudioCall() {
         updateStatus('call-status', 'Connecting...', 'connecting');
         addSystemMessage('Starting audio call...');
 
+        callType = 'audio';
+        callActive = true;
         pc = createPeerConnection(false);
+
+        // Add only audio tracks
+        localStream.getAudioTracks().forEach(track => pc.addTrack(track, localStream));
+
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
         socket.emit('offer', { offer, to: 'all' });
-
-        isAudioCallActive = true;
     } catch (err) {
         console.error('Audio call error:', err);
         updateStatus('call-status', 'Failed', 'error');
         btn.classList.remove('active');
+        callActive = false;
+        callType = null;
     }
 }
 
@@ -217,14 +246,14 @@ async function toggleAudioCall() {
 async function toggleScreenShare() {
     const btn = document.getElementById('screen-share-btn');
 
-    if (isScreenSharing) {
+    if (screenShareActive) {
         // Stop sharing
         if (screenPC) screenPC.close();
         screenPC = null;
         if (window.screenStream) {
             window.screenStream.getTracks().forEach(t => t.stop());
         }
-        isScreenSharing = false;
+        screenShareActive = false;
         btn.classList.remove('sharing');
         socket.emit('screen-stopped');
         addSystemMessage('You stopped sharing screen');
@@ -236,7 +265,7 @@ async function toggleScreenShare() {
             video: true,
             audio: true
         });
-        window.screenStream = screenStream; // save for stop
+        window.screenStream = screenStream;
 
         btn.classList.add('sharing');
         addSystemMessage('You are sharing screen');
@@ -250,7 +279,7 @@ async function toggleScreenShare() {
         socket.emit('screen-offer', { offer, to: 'all' });
         socket.emit('screen-started');
 
-        isScreenSharing = true;
+        screenShareActive = true;
 
         screenStream.getVideoTracks()[0].onended = () => toggleScreenShare();
     } catch (err) {
@@ -263,7 +292,7 @@ function joinScreenShare() {
     if (!screenSharerId || screenSharerId === socket.id) return;
 
     if (screenPC) screenPC.close();
-    screenPC = new RTCPeerConnection(config);
+    screenPC = new RTCPeerConnection(iceServers);
     screenPC.ontrack = (event) => {
         const screenVideo = document.getElementById('screen-video');
         screenVideo.srcObject = event.streams[0];
@@ -317,13 +346,27 @@ socket.on('new-message', (data) => {
 socket.on('user-joined', (msg) => addSystemMessage(msg));
 socket.on('user-left', (msg) => addSystemMessage(msg));
 
-// Video/audio call signaling
+// Handle incoming offer
 socket.on('offer', async (data) => {
     if (data.from === socket.id) return;
     console.log('Received offer from', data.from);
 
-    if (!pc) {
-        pc = createPeerConnection(false);
+    // If we are already in a call, we may need to handle multiple offers.
+    // For simplicity, if we have an active call, we ignore new offers.
+    // But if we are not in a call, we accept.
+    if (callActive) {
+        console.log('Already in a call, ignoring offer');
+        return;
+    }
+
+    // Create peer connection
+    pc = createPeerConnection(false);
+    // Add local tracks (if any) - but we only add if we are going to answer.
+    // Actually we need to add them before setting remote description, because we will answer with our media.
+    if (localStream) {
+        // For video call, add all tracks; for audio only, we need to know the type from the offer?
+        // We can just add all tracks we have; remote can handle.
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     }
 
     await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
@@ -331,14 +374,21 @@ socket.on('offer', async (data) => {
     await pc.setLocalDescription(answer);
 
     socket.emit('answer', { answer, to: data.from });
+
+    // Mark call as active; we don't know if it's audio or video yet, but we'll set based on presence of video tracks?
+    callActive = true;
+    // We'll set callType later when we receive tracks.
+    updateStatus('call-status', 'Connecting...', 'connecting');
 });
 
+// Handle answer
 socket.on('answer', async (data) => {
     if (data.from === socket.id || !pc) return;
     console.log('Received answer from', data.from);
     await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
 });
 
+// Handle ICE candidate
 socket.on('ice-candidate', async (data) => {
     if (data.from === socket.id || !pc) return;
     try {
@@ -352,14 +402,14 @@ socket.on('ice-candidate', async (data) => {
 socket.on('screen-offer', async (data) => {
     if (data.from === socket.id) return;
 
-    if (isScreenSharing && screenPC) {
+    if (screenShareActive && screenPC) {
         // We are the sharer, answer this viewer
         await screenPC.setRemoteDescription(new RTCSessionDescription(data.offer));
         const answer = await screenPC.createAnswer();
         await screenPC.setLocalDescription(answer);
         socket.emit('screen-answer', { answer, to: data.from });
     } else if (screenPC) {
-        // We are a viewer, answer the sharer
+        // We are a viewer, answer the sharer (this happens when we initiated join)
         await screenPC.setRemoteDescription(new RTCSessionDescription(data.offer));
         const answer = await screenPC.createAnswer();
         await screenPC.setLocalDescription(answer);
@@ -377,7 +427,7 @@ socket.on('screen-ice-candidate', async (data) => {
     try {
         await screenPC.addIceCandidate(new RTCIceCandidate(data.candidate));
     } catch (err) {
-        console.error('Error adding screen ICE:', err);
+        console.error('Error adding screen ICE candidate:', err);
     }
 });
 
