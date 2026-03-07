@@ -37,45 +37,48 @@ io.on('connection', (socket) => {
     }
   });
 
-  // WebRTC signaling (audio/video calls)
+  // WebRTC signaling (audio/video calls) – FIXED
   socket.on('offer', (data) => {
-    socket.to(data.target).emit('offer', {
+    // Broadcast offer to all other clients
+    socket.broadcast.emit('offer', {
       offer: data.offer,
       sender: socket.id
     });
   });
 
   socket.on('answer', (data) => {
-    socket.to(data.target).emit('answer', {
+    // Send answer to specific target
+    io.to(data.target).emit('answer', {
       answer: data.answer,
       sender: socket.id
     });
   });
 
   socket.on('ice-candidate', (data) => {
-    socket.to(data.target).emit('ice-candidate', {
+    // Send ICE candidate to specific target
+    io.to(data.target).emit('ice-candidate', {
       candidate: data.candidate,
       sender: socket.id
     });
   });
 
-  // Screen share signaling
+  // Screen share signaling – FIXED
   socket.on('screen-offer', (data) => {
-    socket.to(data.target).emit('screen-offer', {
+    socket.broadcast.emit('screen-offer', {
       offer: data.offer,
       sender: socket.id
     });
   });
 
   socket.on('screen-answer', (data) => {
-    socket.to(data.target).emit('screen-answer', {
+    io.to(data.target).emit('screen-answer', {
       answer: data.answer,
       sender: socket.id
     });
   });
 
   socket.on('screen-ice-candidate', (data) => {
-    socket.to(data.target).emit('screen-ice-candidate', {
+    io.to(data.target).emit('screen-ice-candidate', {
       candidate: data.candidate,
       sender: socket.id
     });

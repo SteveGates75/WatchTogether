@@ -12,7 +12,7 @@ let screenSharer = null;
 let isViewingScreen = false;
 let pendingCandidates = [];
 
-// Media constraints with noise cancellation (for video call)
+// Media constraints with noise cancellation
 const mediaConstraints = {
     audio: {
         echoCancellation: true,
@@ -48,7 +48,7 @@ function login() {
     socket.emit('join', username);
     addMessage('system', `You joined as ${username}`);
     
-    // Get camera and microphone (for video call)
+    // Get camera and microphone
     navigator.mediaDevices.getUserMedia(mediaConstraints)
         .then(stream => {
             localStream = stream;
@@ -59,19 +59,20 @@ function login() {
             localVideo.srcObject = stream;
             document.getElementById('local-video-preview').classList.add('active');
             
-            console.log('Camera and microphone ready');
+            console.log('✅ Camera and microphone ready');
         })
         .catch(err => {
-            console.error('Media error:', err);
+            console.error('❌ Media error:', err);
             updateStatus('call-status', 'Device error', 'error');
             // Fallback to audio only
             navigator.mediaDevices.getUserMedia({ audio: true })
                 .then(stream => {
                     localStream = stream;
                     updateStatus('call-status', 'Mic ready', 'connected');
+                    console.log('✅ Microphone ready (fallback)');
                 })
                 .catch(err => {
-                    console.error('Mic error:', err);
+                    console.error('❌ Mic error:', err);
                 });
         });
 }
@@ -154,10 +155,12 @@ async function toggleVideoCall() {
             // Add all tracks (audio and video)
             localStream.getTracks().forEach(track => {
                 peerConnection.addTrack(track, localStream);
+                console.log(`Added local track: ${track.kind}`);
             });
             
             // Handle remote stream
             peerConnection.ontrack = (event) => {
+                console.log('Received remote track:', event.track.kind);
                 const remoteVideo = document.getElementById('remote-video');
                 remoteVideo.srcObject = event.streams[0];
                 updateStatus('video-status', 'Connected', 'connected');
@@ -167,15 +170,20 @@ async function toggleVideoCall() {
             // ICE candidates
             peerConnection.onicecandidate = (event) => {
                 if (event.candidate) {
+                    console.log('Sending ICE candidate');
                     socket.emit('ice-candidate', {
                         candidate: event.candidate,
-                        target: 'all'
+                        target: 'all' // will be broadcast by server
                     });
                 }
             };
             
             // Handle connection state
             peerConnection.onconnectionstatechange = () => {
+                console.log('Peer connection state:', peerConnection.connectionState);
+                if (peerConnection.connectionState === 'connected') {
+                    console.log('✅ Video call established');
+                }
                 if (peerConnection.connectionState === 'disconnected' || 
                     peerConnection.connectionState === 'failed') {
                     isVideoActive = false;
@@ -187,10 +195,11 @@ async function toggleVideoCall() {
             // Create offer
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
+            console.log('Created offer, sending...');
             
             socket.emit('offer', {
                 offer: offer,
-                target: 'all'
+                target: 'all' // server will broadcast
             });
             
             isVideoActive = true;
@@ -241,10 +250,12 @@ async function toggleCall() {
             // Add only audio tracks
             localStream.getAudioTracks().forEach(track => {
                 peerConnection.addTrack(track, localStream);
+                console.log(`Added audio track`);
             });
             
             // Handle remote audio
             peerConnection.ontrack = (event) => {
+                console.log('Received remote audio');
                 const audio = new Audio();
                 audio.srcObject = event.streams[0];
                 audio.autoplay = true;
@@ -389,6 +400,7 @@ function joinVideo() {
     peerConnection = new RTCPeerConnection(configuration);
     
     peerConnection.ontrack = (event) => {
+        console.log('Received screen track');
         const video = document.getElementById('remote-screen');
         video.srcObject = event.streams[0];
         document.getElementById('screen-container').classList.add('active');
@@ -499,6 +511,7 @@ socket.on('user-left', (msg) => addMessage('system', msg));
 // WebRTC signaling (for audio/video calls)
 socket.on('offer', async (data) => {
     if (data.sender === socket.id) return;
+    console.log('Received offer from', data.sender);
     
     if (!peerConnection) {
         peerConnection = new RTCPeerConnection(configuration);
@@ -510,7 +523,7 @@ socket.on('offer', async (data) => {
         }
         
         peerConnection.ontrack = (event) => {
-            // Determine if it's video or audio only
+            console.log('Received remote track:', event.track.kind);
             if (event.track.kind === 'video') {
                 const remoteVideo = document.getElementById('remote-video');
                 remoteVideo.srcObject = event.streams[0];
@@ -538,6 +551,7 @@ socket.on('offer', async (data) => {
     await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
     const answer = await peerConnection.createAnswer();
     await peerConnection.setLocalDescription(answer);
+    console.log('Sending answer to', data.sender);
     
     socket.emit('answer', {
         answer: answer,
@@ -547,6 +561,7 @@ socket.on('offer', async (data) => {
 
 socket.on('answer', async (data) => {
     if (!peerConnection) return;
+    console.log('Received answer from', data.sender);
     await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
 });
 
@@ -554,6 +569,7 @@ socket.on('ice-candidate', async (data) => {
     if (!peerConnection) return;
     try {
         await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+        console.log('Added ICE candidate');
     } catch (err) {
         console.error('Error adding ICE candidate:', err);
     }
@@ -562,6 +578,7 @@ socket.on('ice-candidate', async (data) => {
 // Screen share signaling
 socket.on('screen-offer', async (data) => {
     if (data.sender === socket.id) return;
+    console.log('Received screen offer from', data.sender);
     
     if (isScreenSharing && screenStream) {
         const pc = new RTCPeerConnection(configuration);
@@ -592,6 +609,7 @@ socket.on('screen-offer', async (data) => {
 
 socket.on('screen-answer', async (data) => {
     if (!peerConnection) return;
+    console.log('Received screen answer');
     
     try {
         await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
