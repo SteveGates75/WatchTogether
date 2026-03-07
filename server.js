@@ -16,78 +16,86 @@ const io = socketIo(server, {
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 
-const users = {};
+// Store connected users
+const users = new Map(); // socketId -> username
 
 io.on('connection', (socket) => {
-  console.log('User connected:', socket.id);
+  console.log(`User connected: ${socket.id}`);
 
+  // Handle joining
   socket.on('join', (username) => {
-    users[socket.id] = { id: socket.id, username: username };
+    users.set(socket.id, username);
+    // Notify everyone that a new user joined
     io.emit('user-joined', `${username} joined the chat`);
   });
 
+  // Handle chat messages
   socket.on('send-message', (data) => {
-    const user = users[socket.id];
-    if (user) {
+    const username = users.get(socket.id);
+    if (username) {
       io.emit('new-message', {
-        user: user.username,
+        user: username,
         message: data.message,
         time: new Date().toLocaleTimeString()
       });
     }
   });
 
-  // WebRTC signaling (audio/video calls) – FIXED
+  // ---------- Video/Audio Call Signaling ----------
+  // When a client wants to start a call, they send an offer.
+  // We broadcast the offer to all other clients.
   socket.on('offer', (data) => {
-    // Broadcast offer to all other clients
     socket.broadcast.emit('offer', {
       offer: data.offer,
-      sender: socket.id
+      from: socket.id
     });
   });
 
+  // When a client answers an offer, send the answer back to the offerer.
   socket.on('answer', (data) => {
-    // Send answer to specific target
-    io.to(data.target).emit('answer', {
+    io.to(data.to).emit('answer', {
       answer: data.answer,
-      sender: socket.id
+      from: socket.id
     });
   });
 
+  // ICE candidate exchange
   socket.on('ice-candidate', (data) => {
-    // Send ICE candidate to specific target
-    io.to(data.target).emit('ice-candidate', {
+    io.to(data.to).emit('ice-candidate', {
       candidate: data.candidate,
-      sender: socket.id
+      from: socket.id
     });
   });
 
-  // Screen share signaling – FIXED
+  // ---------- Screen Share Signaling ----------
+  // Similar pattern but with different event names to avoid confusion.
   socket.on('screen-offer', (data) => {
     socket.broadcast.emit('screen-offer', {
       offer: data.offer,
-      sender: socket.id
+      from: socket.id
     });
   });
 
   socket.on('screen-answer', (data) => {
-    io.to(data.target).emit('screen-answer', {
+    io.to(data.to).emit('screen-answer', {
       answer: data.answer,
-      sender: socket.id
+      from: socket.id
     });
   });
 
   socket.on('screen-ice-candidate', (data) => {
-    io.to(data.target).emit('screen-ice-candidate', {
+    io.to(data.to).emit('screen-ice-candidate', {
       candidate: data.candidate,
-      sender: socket.id
+      from: socket.id
     });
   });
 
+  // Notify others when screen share starts/stops
   socket.on('screen-started', () => {
+    const username = users.get(socket.id);
     socket.broadcast.emit('screen-available', {
       sharer: socket.id,
-      username: users[socket.id]?.username
+      username: username
     });
   });
 
@@ -95,11 +103,12 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('screen-unavailable');
   });
 
+  // Handle disconnection
   socket.on('disconnect', () => {
-    const user = users[socket.id];
-    if (user) {
-      io.emit('user-left', `${user.username} left the chat`);
-      delete users[socket.id];
+    const username = users.get(socket.id);
+    if (username) {
+      io.emit('user-left', `${username} left the chat`);
+      users.delete(socket.id);
     }
     socket.broadcast.emit('screen-unavailable');
   });
