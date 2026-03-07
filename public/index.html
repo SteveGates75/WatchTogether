@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>4K Screen Share - Optimized</title>
+    <title>4K Screen Share + Video Call</title>
     <style>
         * {
             margin: 0;
@@ -147,13 +147,41 @@
             flex: 1;
             display: flex;
             flex-direction: column;
+            padding: 1rem;
+        }
+
+        /* Local video preview */
+        .video-preview {
+            background: #1a1a1a;
+            border-radius: 12px;
+            margin-bottom: 1rem;
+            padding: 0.5rem;
+            display: none;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .video-preview.active {
+            display: flex;
+        }
+
+        .video-preview video {
+            width: 120px;
+            height: 90px;
+            border-radius: 8px;
+            background: #2a2a2a;
+            object-fit: cover;
+        }
+
+        .video-preview span {
+            font-size: 14px;
+            color: #888;
         }
 
         .chat-container {
             flex: 1;
             display: flex;
             flex-direction: column;
-            padding: 1rem;
         }
 
         #messages {
@@ -305,16 +333,6 @@
             animation: pulse 1.5s infinite;
         }
 
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
-        }
-
-        #bitrate-status {
-            background: #2a2a2a;
-        }
-
         #audio-visualizer {
             width: 100px;
             height: 30px;
@@ -335,7 +353,7 @@
             transition: width 0.1s;
         }
 
-        /* Screen Container */
+        /* Screen Container (for viewing shared screen) */
         #screen-container {
             position: fixed;
             top: 0;
@@ -357,14 +375,6 @@
             padding: 0;
         }
 
-        #screen-container:-webkit-full-screen {
-            background: black;
-        }
-
-        #screen-container:-moz-full-screen {
-            background: black;
-        }
-
         .video-wrapper {
             flex: 1;
             display: flex;
@@ -383,7 +393,6 @@
             height: auto;
             object-fit: contain;
             background: black;
-            box-shadow: 0 0 20px rgba(0,0,0,0.5);
         }
 
         .screen-controls {
@@ -479,7 +488,7 @@
             100% { opacity: 0; transform: translateX(-50%) translateY(-20px); }
         }
 
-        /* Join Video Button */
+        /* Join Video Button (for screen share) */
         #join-video-btn {
             display: none;
             background: #5865f2;
@@ -495,6 +504,10 @@
             margin: 10px;
             box-shadow: 0 4px 15px rgba(88, 101, 242, 0.4);
             transition: all 0.3s;
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
         }
 
         #join-video-btn:hover {
@@ -506,7 +519,58 @@
             display: flex;
         }
 
-        /* Mobile responsiveness */
+        /* Remote video container for video calls */
+        #remote-video-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: black;
+            z-index: 2000;
+            display: none;
+            flex-direction: column;
+        }
+
+        #remote-video-container.active {
+            display: flex;
+        }
+
+        #remote-video {
+            flex: 1;
+            width: 100%;
+            object-fit: contain;
+        }
+
+        .remote-controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 10px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .remote-controls button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .remote-controls button:first-child {
+            background: #5865f2;
+            color: white;
+        }
+
+        .remote-controls button:last-child {
+            background: #ed4245;
+            color: white;
+        }
+
         @media (max-width: 768px) {
             .sidebar {
                 width: 60px;
@@ -544,19 +608,29 @@
 </head>
 <body>
     <div id="login-container">
-        <h2>🎬 4K Screen Share</h2>
+        <h2>🎬 4K Screen Share + Video Call</h2>
         <input type="text" id="username-input" placeholder="Enter your name" autocomplete="off">
         <button onclick="login()">Join Chat</button>
     </div>
 
     <div id="app-container">
         <div class="sidebar">
+            <!-- New Video Call Button -->
+            <button id="videoBtn" onclick="toggleVideoCall()" data-tooltip="Video Call">📹</button>
+            <!-- Existing Audio Call Button -->
             <button id="callBtn" onclick="toggleCall()" data-tooltip="Audio Call">🎧</button>
+            <!-- Existing Screen Share Button -->
             <button id="screenBtn" onclick="toggleScreenShare()" data-tooltip="Share Screen">📺</button>
-            <button id="joinVideoBtn" onclick="joinVideo()" data-tooltip="Join Video" class="video-active">📱 Join Video</button>
+            <!-- Existing Join Screen Share Button -->
+            <button id="joinVideoBtn" onclick="joinVideo()" data-tooltip="Join Screen Share" class="video-active">📱 Join</button>
         </div>
         
         <div class="main-content">
+            <!-- Local video preview (shows when camera is active) -->
+            <div class="video-preview" id="local-video-preview">
+                <video id="local-video" autoplay playsinline muted></video>
+                <span>You</span>
+            </div>
             <div class="chat-container">
                 <div id="messages"></div>
                 <div class="message-input">
@@ -571,12 +645,12 @@
         <div id="call-status" class="status-badge"></div>
         <div id="screen-status" class="status-badge"></div>
         <div id="video-status" class="status-badge"></div>
-        <div id="bitrate-status" class="status-badge">📊 0 Kbps</div>
         <div id="audio-visualizer" class="status-badge">
             <div class="visualizer-bar" id="visualizer-bar"></div>
         </div>
     </div>
 
+    <!-- Screen share viewing container -->
     <div id="screen-container">
         <div class="video-wrapper">
             <video id="remote-screen" autoplay playsinline></video>
@@ -592,6 +666,15 @@
             <button onclick="closeScreenView()">
                 ✕ Close
             </button>
+        </div>
+    </div>
+
+    <!-- Remote video container for video calls -->
+    <div id="remote-video-container">
+        <video id="remote-video" autoplay playsinline></video>
+        <div class="remote-controls">
+            <button onclick="toggleFullscreenRemote()">⛶ Fullscreen</button>
+            <button onclick="closeRemoteVideo()">Close</button>
         </div>
     </div>
 
