@@ -1,7 +1,7 @@
 {
-  "name": "video-call-app",
+  "name": "simple-video-call",
   "version": "1.0.0",
-  "description": "Simple Video/Audio Call & Screen Share",
+  "description": "Video Call with Manual Accept, Mute, Fullscreen",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

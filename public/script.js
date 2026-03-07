@@ -5,7 +5,11 @@ let pc;
 let username;
 let remoteUserId = null;
 let callActive = false;
-let incomingCall = false; // true when we receive an offer and haven't answered yet
+let pendingOffer = null; // store offer when received
+
+// Media controls
+let audioEnabled = true;
+let videoEnabled = true;
 
 // STUN servers
 const iceConfig = {
@@ -83,7 +87,7 @@ function createPeerConnection(targetId) {
     return pc;
 }
 
-// ==================== START CALL TO A USER ====================
+// ==================== START CALL ====================
 function callUser(targetId, targetName) {
     if (callActive) {
         alert('Already in a call');
@@ -107,14 +111,36 @@ function callUser(targetId, targetName) {
         .catch(err => console.error('Offer error:', err));
 }
 
-// ==================== ACCEPT INCOMING CALL ====================
+// ==================== ACCEPT CALL ====================
 function acceptCall() {
-    if (!incomingCall || !pc) return;
-    // The answer is already created in the 'offer' handler; we just need to send it.
-    // Actually, in the offer handler we already created and sent the answer.
-    // So we just need to set a flag. For simplicity, we'll auto-answer.
-    // But if you want a manual accept, you'd store the answer and send on button click.
-    // We'll auto-answer for simplicity.
+    if (!pendingOffer) return;
+    document.getElementById('incoming-call').style.display = 'none';
+
+    remoteUserId = pendingOffer.from;
+    pc = createPeerConnection(remoteUserId);
+
+    pc.setRemoteDescription(new RTCSessionDescription(pendingOffer.offer))
+        .then(() => pc.createAnswer())
+        .then(answer => pc.setLocalDescription(answer))
+        .then(() => {
+            console.log('📤 Sending answer to', remoteUserId);
+            socket.emit('answer', {
+                answer: pc.localDescription,
+                targetId: remoteUserId
+            });
+            updateStatus('Connecting...');
+        })
+        .catch(err => console.error('Accept error:', err));
+
+    pendingOffer = null;
+}
+
+// ==================== REJECT CALL ====================
+function rejectCall() {
+    document.getElementById('incoming-call').style.display = 'none';
+    // Optionally send a rejection signal to the caller
+    socket.emit('call-rejected', { targetId: pendingOffer.from });
+    pendingOffer = null;
 }
 
 // ==================== HANG UP ====================
@@ -129,15 +155,46 @@ function hangUp() {
     updateStatus('Call ended');
 }
 
+// ==================== MUTE CONTROLS ====================
+function toggleMuteAudio() {
+    if (!localStream) return;
+    audioEnabled = !audioEnabled;
+    localStream.getAudioTracks().forEach(track => track.enabled = audioEnabled);
+    const btn = document.getElementById('muteAudioBtn');
+    btn.textContent = audioEnabled ? '🔊 Mute Mic' : '🔇 Unmute Mic';
+    document.getElementById('localMuteIndicator').style.display = audioEnabled ? 'none' : 'block';
+}
+
+function toggleMuteVideo() {
+    if (!localStream) return;
+    videoEnabled = !videoEnabled;
+    localStream.getVideoTracks().forEach(track => track.enabled = videoEnabled);
+    const btn = document.getElementById('muteVideoBtn');
+    btn.textContent = videoEnabled ? '🎥 Hide Video' : '🎥 Show Video';
+}
+
+// ==================== FULLSCREEN ====================
+function toggleFullscreen() {
+    const remoteVideo = document.getElementById('remoteVideo');
+    if (!remoteVideo) return;
+    if (remoteVideo.requestFullscreen) {
+        remoteVideo.requestFullscreen();
+    } else if (remoteVideo.webkitRequestFullscreen) {
+        remoteVideo.webkitRequestFullscreen();
+    } else if (remoteVideo.msRequestFullscreen) {
+        remoteVideo.msRequestFullscreen();
+    }
+}
+
 // ==================== SOCKET EVENTS ====================
 
-// Receive list of users (sent after join)
+// Receive list of users
 socket.on('user-list', (users) => {
     console.log('Online users:', users);
     const listDiv = document.getElementById('user-list');
     listDiv.innerHTML = '';
     users.forEach(user => {
-        if (user.id !== socket.id) { // don't show yourself
+        if (user.id !== socket.id) {
             const div = document.createElement('div');
             div.className = 'user-item';
             div.textContent = user.name;
@@ -149,8 +206,7 @@ socket.on('user-list', (users) => {
 
 // Someone joined
 socket.on('user-joined', (data) => {
-    console.log(`${data.username} joined, ID: ${data.id}`);
-    // Add to list
+    console.log(`${data.username} joined`);
     const listDiv = document.getElementById('user-list');
     const div = document.createElement('div');
     div.className = 'user-item';
@@ -162,7 +218,6 @@ socket.on('user-joined', (data) => {
 // Someone left
 socket.on('user-left', (data) => {
     console.log(`${data.username} left`);
-    // Remove from list
     const items = document.getElementById('user-list').children;
     for (let item of items) {
         if (item.textContent === data.username) {
@@ -176,28 +231,21 @@ socket.on('user-left', (data) => {
 });
 
 // Receive offer
-socket.on('offer', async (data) => {
+socket.on('offer', (data) => {
     console.log('📲 Received offer from', data.from);
     if (callActive) {
         console.log('Already in a call, ignoring');
         return;
     }
-    remoteUserId = data.from;
-
-    pc = createPeerConnection(remoteUserId);
-
-    await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-
-    console.log('📤 Sending answer to', remoteUserId);
-    socket.emit('answer', {
-        answer: pc.localDescription,
-        targetId: remoteUserId
-    });
-
-    updateStatus('Connecting...');
-    // You could set a flag here for manual accept, but we'll auto-answer.
+    // Store offer and show incoming call popup
+    pendingOffer = data;
+    // Find caller's name (optional)
+    const callerItem = Array.from(document.getElementById('user-list').children).find(
+        item => item.onclick && item.onclick.toString().includes(data.from)
+    );
+    const callerName = callerItem ? callerItem.textContent : 'Someone';
+    document.getElementById('callerName').textContent = callerName;
+    document.getElementById('incoming-call').style.display = 'block';
 });
 
 // Receive answer
@@ -215,5 +263,14 @@ socket.on('ice-candidate', async (data) => {
         await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
     } catch (err) {
         console.error('Error adding ICE candidate:', err);
+    }
+});
+
+// Call rejection
+socket.on('call-rejected', (data) => {
+    if (data.from === remoteUserId) {
+        hangUp();
+        updateStatus('Call rejected');
+        alert('The other party rejected your call.');
     }
 });

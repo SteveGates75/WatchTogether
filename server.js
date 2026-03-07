@@ -56,6 +56,12 @@ io.on('connection', (socket) => {
     });
   });
 
+  // Call rejection
+  socket.on('call-rejected', (data) => {
+    console.log(`📞 Call rejected from ${socket.id} to ${data.targetId}`);
+    io.to(data.targetId).emit('call-rejected', { from: socket.id });
+  });
+
   socket.on('disconnect', () => {
     const username = users.get(socket.id);
     if (username) {

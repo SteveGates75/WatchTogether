@@ -3,23 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Simple Video Call</title>
+    <title>Video Call App</title>
     <style>
-        body { margin:0; background:#111; color:white; font-family:sans-serif; display:flex; }
-        #login { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:#222; padding:20px; border-radius:8px; }
-        #login input, #login button { padding:10px; margin:5px; }
-        #app { display:none; width:100%; height:100vh; }
-        #sidebar { width:200px; background:#1a1a1a; padding:10px; overflow-y:auto; }
-        #sidebar h3 { color:#aaa; margin-bottom:10px; }
-        .user-item { padding:8px; margin-bottom:5px; background:#2a2a2a; border-radius:5px; cursor:pointer; }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { background:#111; color:white; font-family:sans-serif; height:100vh; display:flex; }
+        #login { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:#222; padding:20px; border-radius:8px; z-index:10; }
+        #login input, #login button { padding:10px; margin:5px; width:100%; }
+        #app { display:none; width:100%; }
+        #sidebar { width:220px; background:#1a1a1a; padding:15px; overflow-y:auto; }
+        #sidebar h3 { color:#aaa; margin-bottom:15px; font-size:16px; }
+        .user-item { padding:10px; margin-bottom:5px; background:#2a2a2a; border-radius:5px; cursor:pointer; transition:background 0.2s; }
         .user-item:hover { background:#3a3a3a; }
-        #main { flex:1; display:flex; flex-direction:column; }
-        #videos { display:flex; justify-content:center; gap:10px; padding:10px; }
-        video { width:45%; max-width:400px; background:#333; border-radius:8px; }
-        #controls { text-align:center; padding:10px; }
-        button { padding:10px 20px; margin:5px; background:#4CAF50; color:white; border:none; border-radius:5px; cursor:pointer; }
-        button.hangup { background:#f44336; }
-        #status { text-align:center; color:#aaa; }
+        #main { flex:1; display:flex; flex-direction:column; padding:15px; }
+        #videos { display:flex; gap:15px; justify-content:center; flex-wrap:wrap; margin-bottom:15px; }
+        .video-container { position:relative; width:45%; min-width:300px; background:#333; border-radius:10px; overflow:hidden; }
+        .video-container video { width:100%; height:100%; object-fit:cover; display:block; }
+        .video-label { position:absolute; bottom:8px; left:8px; background:rgba(0,0,0,0.6); padding:4px 8px; border-radius:4px; font-size:12px; }
+        .mute-indicator { position:absolute; top:8px; right:8px; background:rgba(255,0,0,0.7); padding:4px 8px; border-radius:4px; font-size:12px; display:none; }
+        #controls { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin:15px 0; }
+        .btn { padding:10px 20px; border:none; border-radius:5px; cursor:pointer; font-weight:bold; transition:opacity 0.2s; }
+        .btn:hover { opacity:0.8; }
+        .btn-green { background:#4CAF50; color:white; }
+        .btn-red { background:#f44336; color:white; }
+        .btn-blue { background:#2196F3; color:white; }
+        .btn-gray { background:#555; color:white; }
+        #status { text-align:center; color:#aaa; margin-top:10px; }
+        #incoming-call { position:fixed; top:20px; left:50%; transform:translateX(-50%); background:#2a2a2a; padding:15px 25px; border-radius:8px; display:none; z-index:100; box-shadow:0 4px 15px rgba(0,0,0,0.5); }
+        #incoming-call button { margin:0 10px; padding:8px 20px; }
+        .fullscreen-btn { position:absolute; top:8px; right:8px; background:rgba(0,0,0,0.5); color:white; border:none; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:12px; }
+        .fullscreen-btn:hover { background:rgba(0,0,0,0.7); }
+        @media (max-width:768px) {
+            #sidebar { width:150px; }
+            .video-container { min-width:250px; }
+        }
     </style>
 </head>
 <body>
@@ -36,14 +52,32 @@
         </div>
         <div id="main">
             <div id="videos">
-                <video id="localVideo" autoplay playsinline muted></video>
-                <video id="remoteVideo" autoplay playsinline></video>
+                <div class="video-container">
+                    <video id="localVideo" autoplay playsinline muted></video>
+                    <span class="video-label">You</span>
+                    <span class="mute-indicator" id="localMuteIndicator">🔇 Muted</span>
+                </div>
+                <div class="video-container">
+                    <video id="remoteVideo" autoplay playsinline></video>
+                    <span class="video-label">Remote</span>
+                    <button class="fullscreen-btn" onclick="toggleFullscreen()">⛶ Fullscreen</button>
+                </div>
             </div>
+
             <div id="controls">
-                <button class="hangup" onclick="hangUp()">📴 Hang Up</button>
+                <button class="btn btn-gray" id="muteAudioBtn" onclick="toggleMuteAudio()">🔊 Mute Mic</button>
+                <button class="btn btn-gray" id="muteVideoBtn" onclick="toggleMuteVideo()">🎥 Hide Video</button>
+                <button class="btn btn-red" onclick="hangUp()">📴 Hang Up</button>
             </div>
+
             <div id="status">Not connected</div>
         </div>
+    </div>
+
+    <div id="incoming-call">
+        <span id="callerName">Someone</span> is calling...
+        <button class="btn btn-green" onclick="acceptCall()">Accept</button>
+        <button class="btn btn-red" onclick="rejectCall()">Reject</button>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
