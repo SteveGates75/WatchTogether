@@ -16,7 +16,6 @@ const io = socketIo(server, {
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Store connected users
 const users = new Map(); // socketId -> username
 
 io.on('connection', (socket) => {
@@ -25,16 +24,15 @@ io.on('connection', (socket) => {
   socket.on('join', (username) => {
     users.set(socket.id, username);
     console.log(`${username} joined`);
-    // Send the list of existing users to the new user (optional)
+    // Send the list of existing users to the new user
     const userList = Array.from(users.entries()).map(([id, name]) => ({ id, name }));
     socket.emit('user-list', userList);
-    // Notify others
+    // Notify others that a new user joined
     socket.broadcast.emit('user-joined', { id: socket.id, username });
   });
 
   // WebRTC signaling
   socket.on('offer', (data) => {
-    // data = { offer, targetId }
     console.log(`📤 Offer from ${socket.id} to ${data.targetId}`);
     io.to(data.targetId).emit('offer', {
       offer: data.offer,
