@@ -78,6 +78,7 @@
             border-right: 3px solid #ffb3c6;
             overflow-y: auto;
             box-shadow: 5px 0 15px rgba(0,0,0,0.1);
+            z-index: 5;
         }
         #sidebar h3 {
             color: #b34180;
@@ -135,22 +136,20 @@
             50%{ transform: translateY(-10px); }
         }
         #videos {
-            display: flex;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 20px;
-            justify-content: center;
-            flex-wrap: wrap;
             margin: 15px 0;
         }
         .video-container {
             position: relative;
-            width: 45%;
-            min-width: 320px;
             background: #ffe5f0;
             border-radius: 20px;
             overflow: hidden;
             box-shadow: 0 15px 30px rgba(0,0,0,0.2);
             border: 4px solid white;
             transition: 0.3s;
+            aspect-ratio: 4/3;
         }
         .video-container:hover { transform: scale(1.02); }
         .video-container video {
@@ -234,17 +233,30 @@
             color: #4a2b3a;
         }
         .btn-gray:hover { background: #ffd9a8; transform: translateY(-3px); }
+        #status-bar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 10px;
+        }
         #status {
-            text-align: center;
-            color: #4a2b3a;
-            font-weight: 500;
             background: rgba(255,255,255,0.5);
             padding: 8px 20px;
             border-radius: 40px;
             backdrop-filter: blur(5px);
             display: inline-block;
-            margin: 0 auto;
         }
+        .quality-badge {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-left: 8px;
+        }
+        .quality-good { background: #4CAF50; box-shadow: 0 0 10px #4CAF50; }
+        .quality-poor { background: #ff9800; box-shadow: 0 0 10px #ff9800; }
+        .quality-bad { background: #f44336; box-shadow: 0 0 10px #f44336; }
         #incoming-call {
             position: fixed;
             top: 30px;
@@ -306,6 +318,42 @@
         .balloon3 { left: 40%; animation-duration: 8s; }
         .balloon4 { left: 60%; animation-duration: 10s; }
         .balloon5 { left: 80%; animation-duration: 6.5s; }
+
+        /* Mobile responsiveness */
+        @media (max-width: 768px) {
+            #sidebar { width: 200px; }
+            #birthday-header h1 { font-size: 28px; }
+        }
+        @media (max-width: 600px) {
+            #app { flex-direction: column; }
+            #sidebar {
+                width: 100%;
+                border-right: none;
+                border-bottom: 3px solid #ffb3c6;
+                padding: 10px;
+                max-height: 120px;
+                overflow-y: auto;
+            }
+            #sidebar h3 { margin-bottom: 10px; }
+            .user-item { padding: 8px 12px; }
+            #controls {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                background: rgba(255,240,245,0.95);
+                padding: 12px 10px;
+                border-top: 2px solid #ffb3c6;
+                z-index: 100;
+                margin: 0;
+                gap: 8px;
+            }
+            .btn {
+                padding: 10px 16px;
+                font-size: 14px;
+            }
+            #status-bar { margin-bottom: 70px; } /* space for fixed controls */
+        }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
 </head>
@@ -349,9 +397,14 @@
             <div id="controls">
                 <button class="btn btn-gray" id="muteAudioBtn" onclick="toggleMuteAudio()">🔊 Mute Mic</button>
                 <button class="btn btn-gray" id="muteVideoBtn" onclick="toggleMuteVideo()">🎥 Hide Video</button>
+                <button class="btn btn-gray" id="switchCameraBtn" onclick="switchCamera()">📷 Switch</button>
+                <button class="btn btn-green" onclick="copyInviteLink()">🔗 Copy Link</button>
                 <button class="btn btn-red" onclick="hangUp()">📴 Hang Up</button>
             </div>
-            <div id="status">Not connected</div>
+            <div id="status-bar">
+                <div id="status">Not connected</div>
+                <span id="quality-indicator" class="quality-badge"></span>
+            </div>
         </div>
     </div>
 

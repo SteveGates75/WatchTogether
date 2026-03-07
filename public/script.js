@@ -5,18 +5,18 @@ let pc;
 let username;
 let remoteUserId = null;
 let callActive = false;
-let pendingOffer = null; // store offer when received
+let pendingOffer = null;
+let currentFacingMode = 'user'; // 'user' = front, 'environment' = back
 
 // Media controls
 let audioEnabled = true;
 let videoEnabled = true;
 
-// Higher quality video constraints (up to 1080p)
-const videoConstraints = {
-    width: { ideal: 1920, max: 1920 },
-    height: { ideal: 1080, max: 1080 },
-    frameRate: { ideal: 30, max: 30 }
-};
+// Adaptive video quality based on device (mobile now gets 720p)
+const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.innerWidth < 768;
+const videoConstraints = isMobile
+    ? { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: 30 }
+    : { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: 30 };
 
 // STUN servers
 const iceConfig = {
@@ -36,13 +36,12 @@ function login() {
     document.getElementById('app').style.display = 'flex';
     updateStatus('Joining...');
 
-    // Get local media with higher quality
+    // Get local media with adaptive quality
     navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: true })
         .then(stream => {
             localStream = stream;
             document.getElementById('localVideo').srcObject = stream;
             updateStatus('Logged in, ready to call');
-            // Trigger confetti on login
             startConfetti();
             setTimeout(stopConfetti, 3000);
         })
@@ -71,7 +70,6 @@ function createPeerConnection(targetId) {
         remoteVideo.srcObject = event.streams[0];
         updateStatus('Connected');
         callActive = true;
-        // Confetti on connect
         startConfetti();
         setTimeout(stopConfetti, 3000);
     };
@@ -90,6 +88,15 @@ function createPeerConnection(targetId) {
     // Connection state changes
     pc.oniceconnectionstatechange = () => {
         console.log('ICE state:', pc.iceConnectionState);
+        const indicator = document.getElementById('quality-indicator');
+        if (pc.iceConnectionState === 'connected') {
+            indicator.className = 'quality-badge quality-good';
+        } else if (pc.iceConnectionState === 'disconnected') {
+            indicator.className = 'quality-badge quality-poor';
+        } else if (pc.iceConnectionState === 'failed') {
+            indicator.className = 'quality-badge quality-bad';
+        }
+
         if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
             updateStatus('Disconnected');
             callActive = false;
@@ -165,6 +172,7 @@ function hangUp() {
     callActive = false;
     remoteUserId = null;
     updateStatus('Call ended');
+    document.getElementById('quality-indicator').className = 'quality-badge';
 }
 
 // ==================== MUTE CONTROLS ====================
@@ -183,6 +191,49 @@ function toggleMuteVideo() {
     localStream.getVideoTracks().forEach(track => track.enabled = videoEnabled);
     const btn = document.getElementById('muteVideoBtn');
     btn.textContent = videoEnabled ? '🎥 Hide Video' : '🎥 Show Video';
+}
+
+// ==================== SWITCH CAMERA ====================
+async function switchCamera() {
+    if (!localStream) return;
+    const tracks = localStream.getVideoTracks();
+    if (tracks.length === 0) return;
+    const newFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+    const constraints = {
+        video: { facingMode: newFacingMode, ...videoConstraints },
+        audio: true
+    };
+    try {
+        const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+        // Replace local video
+        document.getElementById('localVideo').srcObject = newStream;
+        // Update peer connection if in a call
+        if (pc) {
+            const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+            if (sender) sender.replaceTrack(newStream.getVideoTracks()[0]);
+        }
+        // Stop old tracks
+        localStream.getTracks().forEach(t => t.stop());
+        localStream = newStream;
+        currentFacingMode = newFacingMode;
+    } catch (err) {
+        console.error('Camera switch failed:', err);
+        alert('Could not switch camera');
+    }
+}
+
+// ==================== COPY INVITE LINK ====================
+function copyInviteLink() {
+    const url = window.location.href;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(() => {
+            alert('Link copied to clipboard!');
+        }).catch(() => {
+            prompt('Copy this link manually:', url);
+        });
+    } else {
+        prompt('Copy this link manually:', url);
+    }
 }
 
 // ==================== FULLSCREEN ====================
@@ -268,13 +319,10 @@ function startConfetti() {
 
 function stopConfetti() {
     // Let particles fade out naturally
-    // Optionally clear immediately:
-    // particles = [];
 }
 
 // ==================== SOCKET EVENTS ====================
 
-// Receive list of users
 socket.on('user-list', (users) => {
     console.log('Online users:', users);
     const listDiv = document.getElementById('user-list');
@@ -290,7 +338,6 @@ socket.on('user-list', (users) => {
     });
 });
 
-// Someone joined
 socket.on('user-joined', (data) => {
     console.log(`${data.username} joined`);
     const listDiv = document.getElementById('user-list');
@@ -303,7 +350,6 @@ socket.on('user-joined', (data) => {
     setTimeout(stopConfetti, 2000);
 });
 
-// Someone left
 socket.on('user-left', (data) => {
     console.log(`${data.username} left`);
     const items = document.getElementById('user-list').children;
@@ -318,7 +364,6 @@ socket.on('user-left', (data) => {
     }
 });
 
-// Receive offer
 socket.on('offer', (data) => {
     console.log('📲 Received offer from', data.from);
     if (callActive) {
@@ -335,14 +380,12 @@ socket.on('offer', (data) => {
     document.getElementById('incoming-call').style.display = 'block';
 });
 
-// Receive answer
 socket.on('answer', async (data) => {
     console.log('📲 Received answer from', data.from);
     if (!pc) return;
     await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
 });
 
-// Receive ICE candidate
 socket.on('ice-candidate', async (data) => {
     console.log('❄️ Received ICE candidate from', data.from);
     if (!pc) return;
@@ -353,7 +396,6 @@ socket.on('ice-candidate', async (data) => {
     }
 });
 
-// Call rejection
 socket.on('call-rejected', (data) => {
     if (data.from === remoteUserId) {
         hangUp();
