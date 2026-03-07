@@ -16,20 +16,16 @@ const io = socketIo(server, {
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Store connected users
 const users = new Map(); // socketId -> username
 
 io.on('connection', (socket) => {
-  console.log(`User connected: ${socket.id}`);
+  console.log('User connected:', socket.id);
 
-  // Handle joining
   socket.on('join', (username) => {
     users.set(socket.id, username);
-    // Notify everyone that a new user joined
     io.emit('user-joined', `${username} joined the chat`);
   });
 
-  // Handle chat messages
   socket.on('send-message', (data) => {
     const username = users.get(socket.id);
     if (username) {
@@ -42,8 +38,7 @@ io.on('connection', (socket) => {
   });
 
   // ---------- Video/Audio Call Signaling ----------
-  // When a client wants to start a call, they send an offer.
-  // We broadcast the offer to all other clients.
+  // Offer -> broadcast to everyone except sender
   socket.on('offer', (data) => {
     socket.broadcast.emit('offer', {
       offer: data.offer,
@@ -51,7 +46,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  // When a client answers an offer, send the answer back to the offerer.
+  // Answer -> send directly to the caller
   socket.on('answer', (data) => {
     io.to(data.to).emit('answer', {
       answer: data.answer,
@@ -59,7 +54,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  // ICE candidate exchange
+  // ICE candidate -> send directly to the target
   socket.on('ice-candidate', (data) => {
     io.to(data.to).emit('ice-candidate', {
       candidate: data.candidate,
@@ -68,7 +63,6 @@ io.on('connection', (socket) => {
   });
 
   // ---------- Screen Share Signaling ----------
-  // Similar pattern but with different event names to avoid confusion.
   socket.on('screen-offer', (data) => {
     socket.broadcast.emit('screen-offer', {
       offer: data.offer,
@@ -90,7 +84,6 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Notify others when screen share starts/stops
   socket.on('screen-started', () => {
     const username = users.get(socket.id);
     socket.broadcast.emit('screen-available', {
@@ -103,7 +96,6 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('screen-unavailable');
   });
 
-  // Handle disconnection
   socket.on('disconnect', () => {
     const username = users.get(socket.id);
     if (username) {
