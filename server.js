@@ -16,16 +16,19 @@ const io = socketIo(server, {
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Store usernames
 const users = new Map(); // socketId -> username
 
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
+  // User joins with username
   socket.on('join', (username) => {
     users.set(socket.id, username);
     io.emit('user-joined', `${username} joined the chat`);
   });
 
+  // Chat message
   socket.on('send-message', (data) => {
     const username = users.get(socket.id);
     if (username) {
@@ -37,7 +40,8 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ---------- Video/Audio Call Signaling ----------
+  // ----- Call Signaling -----
+  // Offer is broadcast to everyone except sender
   socket.on('offer', (data) => {
     socket.broadcast.emit('offer', {
       offer: data.offer,
@@ -45,6 +49,7 @@ io.on('connection', (socket) => {
     });
   });
 
+  // Answer goes directly to the caller
   socket.on('answer', (data) => {
     io.to(data.to).emit('answer', {
       answer: data.answer,
@@ -52,6 +57,7 @@ io.on('connection', (socket) => {
     });
   });
 
+  // ICE candidate goes directly to the target
   socket.on('ice-candidate', (data) => {
     io.to(data.to).emit('ice-candidate', {
       candidate: data.candidate,
@@ -59,7 +65,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  // ---------- Screen Share Signaling ----------
+  // ----- Screen Share Signaling -----
   socket.on('screen-offer', (data) => {
     socket.broadcast.emit('screen-offer', {
       offer: data.offer,
@@ -81,6 +87,7 @@ io.on('connection', (socket) => {
     });
   });
 
+  // Screen share started/stopped notifications
   socket.on('screen-started', () => {
     const username = users.get(socket.id);
     socket.broadcast.emit('screen-available', {
@@ -93,6 +100,7 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('screen-unavailable');
   });
 
+  // Disconnect
   socket.on('disconnect', () => {
     const username = users.get(socket.id);
     if (username) {

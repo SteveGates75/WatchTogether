@@ -1,16 +1,16 @@
-// ==================== GLOBALS ====================
+// ==================== CONFIGURATION ====================
 const socket = io();
 let username = '';
 let localStream = null;
-let pc = null;           // main peer connection for audio/video calls
-let screenPC = null;     // separate peer connection for screen share
-let screenSharerId = null;
-let callActive = false;  // true if any call (audio or video) is active
+let pc = null;           // PeerConnection for calls
+let screenPC = null;     // PeerConnection for screen share
+let screenSharerId = null; // Socket ID of the person sharing screen
+let callActive = false;  // Is there an active audio/video call?
 let callType = null;     // 'audio' or 'video'
 let screenShareActive = false;
 
-// ICE servers for faster connectivity
-const iceServers = {
+// Multiple STUN servers for faster NAT traversal
+const iceConfig = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
@@ -41,13 +41,13 @@ function updateStatus(id, text, state = '') {
 // ==================== LOGIN ====================
 function login() {
     username = document.getElementById('username').value.trim();
-    if (!username) return alert('Enter name');
+    if (!username) return alert('Enter your name');
     document.getElementById('login-container').style.display = 'none';
     document.getElementById('app-container').style.display = 'flex';
     socket.emit('join', username);
     addSystemMessage(`You joined as ${username}`);
 
-    // Request media
+    // Request camera and microphone
     navigator.mediaDevices.getUserMedia({ audio: true, video: true })
         .then(stream => {
             localStream = stream;
@@ -55,7 +55,7 @@ function login() {
             updateStatus('device-status', 'Camera & Mic OK', 'connected');
         })
         .catch(err => {
-            console.warn('Camera error, falling back to audio', err);
+            console.warn('Camera error, falling back to audio only', err);
             navigator.mediaDevices.getUserMedia({ audio: true })
                 .then(stream => {
                     localStream = stream;
@@ -77,16 +77,11 @@ function sendMessage() {
     input.value = '';
 }
 
-// ==================== PEER CONNECTION MANAGEMENT ====================
+// ==================== PEER CONNECTION FACTORY ====================
 function createPeerConnection(isScreen = false) {
-    const pc = new RTCPeerConnection(iceServers);
+    const pc = new RTCPeerConnection(iceConfig);
 
-    // Add local tracks if we have a stream and it's not a screen share (screen tracks added separately)
-    if (localStream && !isScreen && callActive) {
-        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-    }
-
-    // Handle incoming tracks
+    // When remote adds tracks
     pc.ontrack = (event) => {
         console.log('Received track:', event.track.kind);
         if (isScreen) {
@@ -95,40 +90,35 @@ function createPeerConnection(isScreen = false) {
             document.getElementById('screen-share-box').style.display = 'block';
             updateStatus('screen-status', 'Viewing', 'connected');
         } else {
-            // For audio/video calls
             const remoteVideo = document.getElementById('remote-video');
             remoteVideo.srcObject = event.streams[0];
-            // If it's an audio-only call, we still show the video element (it will be black, but audio plays)
-            // To ensure audio plays even if video element is hidden, we also create an audio element.
-            if (callType === 'audio' && event.track.kind === 'audio') {
-                // For audio-only, create a separate Audio element to guarantee playback
+            // For audio-only calls, also create an audio element to guarantee playback
+            if (callType === 'audio') {
                 const audio = new Audio();
                 audio.srcObject = event.streams[0];
                 audio.autoplay = true;
-                audio.play().catch(e => console.warn('Audio play failed:', e));
             }
             updateStatus('call-status', 'Connected', 'connected');
             addSystemMessage('Call connected');
         }
     };
 
-    // Handle ICE candidates
+    // Send ICE candidates
     pc.onicecandidate = (event) => {
         if (event.candidate) {
             if (isScreen) {
                 socket.emit('screen-ice-candidate', { candidate: event.candidate, to: screenSharerId || 'all' });
             } else {
-                // For regular calls, we need to know the target. We'll store the remote peer ID.
-                // For simplicity, we broadcast ICE candidates and let the client ignore its own.
                 socket.emit('ice-candidate', { candidate: event.candidate, to: 'all' });
             }
         }
     };
 
+    // Debug connection state
     pc.oniceconnectionstatechange = () => {
-        console.log('ICE connection state:', pc.iceConnectionState);
+        console.log('ICE state:', pc.iceConnectionState);
         if (pc.iceConnectionState === 'failed') {
-            console.error('ICE failed, restarting...');
+            console.warn('ICE failed, attempting restart');
             pc.restartIce();
         }
     };
@@ -141,8 +131,8 @@ async function toggleVideoCall() {
     if (!localStream) return alert('Camera/mic not available');
     const btn = document.getElementById('video-call-btn');
 
+    // If already in a video call, hang up
     if (callActive && callType === 'video') {
-        // End call
         if (pc) pc.close();
         pc = null;
         callActive = false;
@@ -173,9 +163,7 @@ async function toggleVideoCall() {
         callActive = true;
         pc = createPeerConnection(false);
 
-        // Add local tracks (we already added them in createPeerConnection if callActive true, but ensure)
-        // Actually createPeerConnection adds tracks only if callActive && localStream. So after setting callActive true, we need to add them.
-        // Let's add them explicitly after pc creation.
+        // Add local tracks
         localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
         const offer = await pc.createOffer();
@@ -292,7 +280,7 @@ function joinScreenShare() {
     if (!screenSharerId || screenSharerId === socket.id) return;
 
     if (screenPC) screenPC.close();
-    screenPC = new RTCPeerConnection(iceServers);
+    screenPC = new RTCPeerConnection(iceConfig);
     screenPC.ontrack = (event) => {
         const screenVideo = document.getElementById('screen-video');
         screenVideo.srcObject = event.streams[0];
@@ -333,7 +321,9 @@ function exitFullscreen() {
     document.getElementById('fullscreen-video').classList.remove('active');
 }
 
-// ==================== SOCKET HANDLERS ====================
+// ==================== SOCKET EVENT HANDLERS ====================
+
+// Chat messages
 socket.on('new-message', (data) => {
     const div = document.getElementById('messages');
     const el = document.createElement('div');
@@ -346,26 +336,20 @@ socket.on('new-message', (data) => {
 socket.on('user-joined', (msg) => addSystemMessage(msg));
 socket.on('user-left', (msg) => addSystemMessage(msg));
 
-// Handle incoming offer
+// Call signaling
 socket.on('offer', async (data) => {
     if (data.from === socket.id) return;
     console.log('Received offer from', data.from);
 
-    // If we are already in a call, we may need to handle multiple offers.
-    // For simplicity, if we have an active call, we ignore new offers.
-    // But if we are not in a call, we accept.
+    // If we are already in a call, ignore new offers (or you could accept multiple, but we keep it simple)
     if (callActive) {
         console.log('Already in a call, ignoring offer');
         return;
     }
 
-    // Create peer connection
+    // Create peer connection and add local tracks
     pc = createPeerConnection(false);
-    // Add local tracks (if any) - but we only add if we are going to answer.
-    // Actually we need to add them before setting remote description, because we will answer with our media.
     if (localStream) {
-        // For video call, add all tracks; for audio only, we need to know the type from the offer?
-        // We can just add all tracks we have; remote can handle.
         localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     }
 
@@ -375,20 +359,17 @@ socket.on('offer', async (data) => {
 
     socket.emit('answer', { answer, to: data.from });
 
-    // Mark call as active; we don't know if it's audio or video yet, but we'll set based on presence of video tracks?
     callActive = true;
-    // We'll set callType later when we receive tracks.
+    // We don't know callType yet, but we'll set it when we receive tracks
     updateStatus('call-status', 'Connecting...', 'connecting');
 });
 
-// Handle answer
 socket.on('answer', async (data) => {
     if (data.from === socket.id || !pc) return;
     console.log('Received answer from', data.from);
     await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
 });
 
-// Handle ICE candidate
 socket.on('ice-candidate', async (data) => {
     if (data.from === socket.id || !pc) return;
     try {
@@ -409,7 +390,7 @@ socket.on('screen-offer', async (data) => {
         await screenPC.setLocalDescription(answer);
         socket.emit('screen-answer', { answer, to: data.from });
     } else if (screenPC) {
-        // We are a viewer, answer the sharer (this happens when we initiated join)
+        // We are a viewer answering the sharer (from joinScreenShare)
         await screenPC.setRemoteDescription(new RTCSessionDescription(data.offer));
         const answer = await screenPC.createAnswer();
         await screenPC.setLocalDescription(answer);
@@ -431,6 +412,7 @@ socket.on('screen-ice-candidate', async (data) => {
     }
 });
 
+// Screen share availability
 socket.on('screen-available', (data) => {
     screenSharerId = data.sharer;
     document.getElementById('join-screen-btn').classList.add('active');

@@ -1,7 +1,7 @@
 {
   "name": "video-call-app",
   "version": "1.0.0",
-  "description": "Video Call with Screen Share",
+  "description": "Simple Video/Audio Call & Screen Share",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
