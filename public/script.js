@@ -11,6 +11,13 @@ let pendingOffer = null; // store offer when received
 let audioEnabled = true;
 let videoEnabled = true;
 
+// Higher quality video constraints (up to 1080p)
+const videoConstraints = {
+    width: { ideal: 1920, max: 1920 },
+    height: { ideal: 1080, max: 1080 },
+    frameRate: { ideal: 30, max: 30 }
+};
+
 // STUN servers
 const iceConfig = {
     iceServers: [
@@ -29,12 +36,15 @@ function login() {
     document.getElementById('app').style.display = 'flex';
     updateStatus('Joining...');
 
-    // Get local media
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    // Get local media with higher quality
+    navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: true })
         .then(stream => {
             localStream = stream;
             document.getElementById('localVideo').srcObject = stream;
             updateStatus('Logged in, ready to call');
+            // Trigger confetti on login
+            startConfetti();
+            setTimeout(stopConfetti, 3000);
         })
         .catch(err => {
             console.error('Media error:', err);
@@ -61,6 +71,9 @@ function createPeerConnection(targetId) {
         remoteVideo.srcObject = event.streams[0];
         updateStatus('Connected');
         callActive = true;
+        // Confetti on connect
+        startConfetti();
+        setTimeout(stopConfetti, 3000);
     };
 
     // ICE candidate
@@ -138,7 +151,6 @@ function acceptCall() {
 // ==================== REJECT CALL ====================
 function rejectCall() {
     document.getElementById('incoming-call').style.display = 'none';
-    // Optionally send a rejection signal to the caller
     socket.emit('call-rejected', { targetId: pendingOffer.from });
     pendingOffer = null;
 }
@@ -186,6 +198,80 @@ function toggleFullscreen() {
     }
 }
 
+// ==================== CONFETTI ====================
+let confettiCanvas = document.getElementById('confetti-canvas');
+let ctx = confettiCanvas.getContext('2d');
+let width, height;
+let particles = [];
+let animationId = null;
+
+function resizeCanvas() {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    confettiCanvas.width = width;
+    confettiCanvas.height = height;
+}
+
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+function randomRange(min, max) {
+    return Math.random() * (max - min) + min;
+}
+
+function createParticle() {
+    return {
+        x: Math.random() * width,
+        y: Math.random() * height - height,
+        size: randomRange(5, 15),
+        speedY: randomRange(2, 8),
+        speedX: randomRange(-2, 2),
+        color: `hsl(${randomRange(0, 360)}, 100%, 60%)`,
+        rotation: randomRange(0, 360),
+        rotationSpeed: randomRange(-2, 2)
+    };
+}
+
+function updateConfetti() {
+    ctx.clearRect(0, 0, width, height);
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.y += p.speedY;
+        p.x += p.speedX;
+        p.rotation += p.rotationSpeed;
+        if (p.y > height + 50) {
+            particles.splice(i, 1);
+            continue;
+        }
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate((p.rotation * Math.PI) / 180);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.size/2, -p.size/2, p.size, p.size);
+        ctx.restore();
+    }
+    if (particles.length > 0) {
+        animationId = requestAnimationFrame(updateConfetti);
+    } else {
+        animationId = null;
+    }
+}
+
+function startConfetti() {
+    if (animationId) cancelAnimationFrame(animationId);
+    particles = [];
+    for (let i = 0; i < 150; i++) {
+        particles.push(createParticle());
+    }
+    animationId = requestAnimationFrame(updateConfetti);
+}
+
+function stopConfetti() {
+    // Let particles fade out naturally
+    // Optionally clear immediately:
+    // particles = [];
+}
+
 // ==================== SOCKET EVENTS ====================
 
 // Receive list of users
@@ -213,6 +299,8 @@ socket.on('user-joined', (data) => {
     div.textContent = data.username;
     div.onclick = () => callUser(data.id, data.username);
     listDiv.appendChild(div);
+    startConfetti();
+    setTimeout(stopConfetti, 2000);
 });
 
 // Someone left
@@ -237,9 +325,8 @@ socket.on('offer', (data) => {
         console.log('Already in a call, ignoring');
         return;
     }
-    // Store offer and show incoming call popup
     pendingOffer = data;
-    // Find caller's name (optional)
+    // Find caller's name
     const callerItem = Array.from(document.getElementById('user-list').children).find(
         item => item.onclick && item.onclick.toString().includes(data.from)
     );

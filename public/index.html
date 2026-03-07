@@ -3,81 +3,362 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Video Call App</title>
+    <title>🎉 Happy Birthday Video Call 🎂</title>
     <style>
         * { margin:0; padding:0; box-sizing:border-box; }
-        body { background:#111; color:white; font-family:sans-serif; height:100vh; display:flex; }
-        #login { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:#222; padding:20px; border-radius:8px; z-index:10; }
-        #login input, #login button { padding:10px; margin:5px; width:100%; }
-        #app { display:none; width:100%; }
-        #sidebar { width:220px; background:#1a1a1a; padding:15px; overflow-y:auto; }
-        #sidebar h3 { color:#aaa; margin-bottom:15px; font-size:16px; }
-        .user-item { padding:10px; margin-bottom:5px; background:#2a2a2a; border-radius:5px; cursor:pointer; transition:background 0.2s; }
-        .user-item:hover { background:#3a3a3a; }
-        #main { flex:1; display:flex; flex-direction:column; padding:15px; }
-        #videos { display:flex; gap:15px; justify-content:center; flex-wrap:wrap; margin-bottom:15px; }
-        .video-container { position:relative; width:45%; min-width:300px; background:#333; border-radius:10px; overflow:hidden; }
-        .video-container video { width:100%; height:100%; object-fit:cover; display:block; }
-        .video-label { position:absolute; bottom:8px; left:8px; background:rgba(0,0,0,0.6); padding:4px 8px; border-radius:4px; font-size:12px; }
-        .mute-indicator { position:absolute; top:8px; right:8px; background:rgba(255,0,0,0.7); padding:4px 8px; border-radius:4px; font-size:12px; display:none; }
-        #controls { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin:15px 0; }
-        .btn { padding:10px 20px; border:none; border-radius:5px; cursor:pointer; font-weight:bold; transition:opacity 0.2s; }
-        .btn:hover { opacity:0.8; }
-        .btn-green { background:#4CAF50; color:white; }
-        .btn-red { background:#f44336; color:white; }
-        .btn-blue { background:#2196F3; color:white; }
-        .btn-gray { background:#555; color:white; }
-        #status { text-align:center; color:#aaa; margin-top:10px; }
-        #incoming-call { position:fixed; top:20px; left:50%; transform:translateX(-50%); background:#2a2a2a; padding:15px 25px; border-radius:8px; display:none; z-index:100; box-shadow:0 4px 15px rgba(0,0,0,0.5); }
-        #incoming-call button { margin:0 10px; padding:8px 20px; }
-        .fullscreen-btn { position:absolute; top:8px; right:8px; background:rgba(0,0,0,0.5); color:white; border:none; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:12px; }
-        .fullscreen-btn:hover { background:rgba(0,0,0,0.7); }
-        @media (max-width:768px) {
-            #sidebar { width:150px; }
-            .video-container { min-width:250px; }
+        body {
+            background: linear-gradient(145deg, #f9d5e5 0%, #fce2c1 100%);
+            color: #2d1b3c;
+            font-family: 'Poppins', sans-serif;
+            height: 100vh;
+            display: flex;
+            position: relative;
+            overflow: hidden;
         }
+        /* Confetti canvas */
+        #confetti-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 9999;
+        }
+        #login {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            padding: 30px;
+            border-radius: 20px;
+            text-align: center;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+            z-index: 10;
+            border: 2px solid #ffb3c6;
+        }
+        #login h3 {
+            font-size: 24px;
+            color: #b34180;
+            margin-bottom: 15px;
+            text-shadow: 2px 2px 0 #ffe5f0;
+        }
+        #login input {
+            padding: 12px;
+            margin: 10px 0;
+            width: 100%;
+            border: 2px solid #ffb3c6;
+            border-radius: 30px;
+            font-size: 16px;
+            outline: none;
+            transition: 0.3s;
+        }
+        #login input:focus { border-color: #b34180; box-shadow: 0 0 10px #ffb3c6; }
+        #login button {
+            padding: 12px 25px;
+            background: #b34180;
+            color: white;
+            border: none;
+            border-radius: 30px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.3s;
+            box-shadow: 0 5px 15px #ffb3c6;
+        }
+        #login button:hover { background: #8f2e68; transform: scale(1.05); }
+        #app { display:none; width:100%; height:100vh; flex-direction:row; }
+        #sidebar {
+            width: 260px;
+            background: rgba(255, 240, 245, 0.9);
+            backdrop-filter: blur(8px);
+            padding: 20px;
+            border-right: 3px solid #ffb3c6;
+            overflow-y: auto;
+            box-shadow: 5px 0 15px rgba(0,0,0,0.1);
+        }
+        #sidebar h3 {
+            color: #b34180;
+            margin-bottom: 20px;
+            font-size: 22px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .user-item {
+            padding: 12px 15px;
+            margin-bottom: 8px;
+            background: white;
+            border-radius: 40px;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            border: 2px solid transparent;
+            font-weight: 500;
+            color: #4a2b3a;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .user-item:before { content: "🎈"; font-size: 18px; }
+        .user-item:hover {
+            background: #ffe5f0;
+            border-color: #ffb3c6;
+            transform: translateX(5px);
+            box-shadow: 0 5px 15px rgba(255,179,198,0.4);
+        }
+        #main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            position: relative;
+        }
+        #birthday-header {
+            text-align: center;
+            margin-bottom: 15px;
+            animation: bounce 2s infinite;
+        }
+        #birthday-header h1 {
+            font-size: 42px;
+            background: linear-gradient(45deg, #b34180, #ff8a5c, #f9d5e5);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 2px 2px 10px rgba(255,255,255,0.8);
+            display: inline-block;
+            padding: 0 20px;
+        }
+        @keyframes bounce {
+            0%,100%{ transform: translateY(0); }
+            50%{ transform: translateY(-10px); }
+        }
+        #videos {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin: 15px 0;
+        }
+        .video-container {
+            position: relative;
+            width: 45%;
+            min-width: 320px;
+            background: #ffe5f0;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 15px 30px rgba(0,0,0,0.2);
+            border: 4px solid white;
+            transition: 0.3s;
+        }
+        .video-container:hover { transform: scale(1.02); }
+        .video-container video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            background: #2d1b3c;
+        }
+        .video-label {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(255,255,255,0.8);
+            color: #b34180;
+            padding: 5px 15px;
+            border-radius: 30px;
+            font-weight: bold;
+            backdrop-filter: blur(5px);
+            border: 2px solid white;
+        }
+        .mute-indicator {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255,0,0,0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 30px;
+            font-size: 12px;
+            display: none;
+            backdrop-filter: blur(5px);
+        }
+        .fullscreen-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255,255,255,0.8);
+            color: #b34180;
+            border: none;
+            border-radius: 30px;
+            padding: 5px 12px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: 0.2s;
+            z-index: 5;
+        }
+        .fullscreen-btn:hover { background: white; transform: scale(1.1); }
+        #controls {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin: 20px 0;
+        }
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 40px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 16px;
+            transition: 0.3s;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-green {
+            background: #ff8a5c;
+            color: white;
+        }
+        .btn-green:hover { background: #ff6f3c; transform: translateY(-3px); }
+        .btn-red {
+            background: #b34180;
+            color: white;
+        }
+        .btn-red:hover { background: #8f2e68; transform: translateY(-3px); }
+        .btn-gray {
+            background: #fce2c1;
+            color: #4a2b3a;
+        }
+        .btn-gray:hover { background: #ffd9a8; transform: translateY(-3px); }
+        #status {
+            text-align: center;
+            color: #4a2b3a;
+            font-weight: 500;
+            background: rgba(255,255,255,0.5);
+            padding: 8px 20px;
+            border-radius: 40px;
+            backdrop-filter: blur(5px);
+            display: inline-block;
+            margin: 0 auto;
+        }
+        #incoming-call {
+            position: fixed;
+            top: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: white;
+            padding: 20px 35px;
+            border-radius: 60px;
+            display: none;
+            z-index: 100;
+            box-shadow: 0 15px 30px rgba(0,0,0,0.2);
+            border: 3px solid #ffb3c6;
+            animation: slideDown 0.3s;
+        }
+        @keyframes slideDown {
+            from { top: -100px; }
+            to { top: 30px; }
+        }
+        #incoming-call span {
+            font-size: 20px;
+            color: #b34180;
+            font-weight: bold;
+            margin-right: 20px;
+        }
+        #incoming-call button {
+            margin: 0 5px;
+            padding: 8px 20px;
+            border: none;
+            border-radius: 30px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        #incoming-call button:first-of-type {
+            background: #4CAF50;
+            color: white;
+        }
+        #incoming-call button:last-of-type {
+            background: #f44336;
+            color: white;
+        }
+        #incoming-call button:hover { transform: scale(1.1); }
+        /* Floating balloons */
+        .balloon {
+            position: absolute;
+            bottom: -150px;
+            font-size: 40px;
+            opacity: 0.7;
+            animation: float 6s infinite ease-in;
+            z-index: 1;
+            pointer-events: none;
+        }
+        @keyframes float {
+            0% { transform: translateY(0) rotate(0deg); }
+            100% { transform: translateY(-120vh) rotate(20deg); }
+        }
+        .balloon1 { left: 5%; animation-duration: 7s; }
+        .balloon2 { left: 20%; animation-duration: 9s; }
+        .balloon3 { left: 40%; animation-duration: 8s; }
+        .balloon4 { left: 60%; animation-duration: 10s; }
+        .balloon5 { left: 80%; animation-duration: 6.5s; }
     </style>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
+    <!-- Confetti canvas -->
+    <canvas id="confetti-canvas"></canvas>
+    <!-- Floating balloons -->
+    <div class="balloon balloon1">🎈</div>
+    <div class="balloon balloon2">🎈</div>
+    <div class="balloon balloon3">🎈</div>
+    <div class="balloon balloon4">🎈</div>
+    <div class="balloon balloon5">🎈</div>
+
     <div id="login">
-        <h3>Enter your name</h3>
-        <input type="text" id="username" placeholder="Name">
-        <button onclick="login()">Join</button>
+        <h3>🎂 Happy Birthday! 🎉</h3>
+        <input type="text" id="username" placeholder="Your name">
+        <button onclick="login()">Join Party 🎈</button>
     </div>
 
     <div id="app">
         <div id="sidebar">
-            <h3>Online Users</h3>
+            <h3>🎈 Party People</h3>
             <div id="user-list"></div>
         </div>
         <div id="main">
+            <div id="birthday-header">
+                <h1>🎉 Happy Birthday! 🎂</h1>
+            </div>
             <div id="videos">
                 <div class="video-container">
                     <video id="localVideo" autoplay playsinline muted></video>
-                    <span class="video-label">You</span>
+                    <span class="video-label">You 🥳</span>
                     <span class="mute-indicator" id="localMuteIndicator">🔇 Muted</span>
                 </div>
                 <div class="video-container">
                     <video id="remoteVideo" autoplay playsinline></video>
-                    <span class="video-label">Remote</span>
-                    <button class="fullscreen-btn" onclick="toggleFullscreen()">⛶ Fullscreen</button>
+                    <span class="video-label">Friend 🎁</span>
+                    <button class="fullscreen-btn" onclick="toggleFullscreen()">⛶ Full</button>
                 </div>
             </div>
-
             <div id="controls">
                 <button class="btn btn-gray" id="muteAudioBtn" onclick="toggleMuteAudio()">🔊 Mute Mic</button>
                 <button class="btn btn-gray" id="muteVideoBtn" onclick="toggleMuteVideo()">🎥 Hide Video</button>
                 <button class="btn btn-red" onclick="hangUp()">📴 Hang Up</button>
             </div>
-
             <div id="status">Not connected</div>
         </div>
     </div>
 
     <div id="incoming-call">
-        <span id="callerName">Someone</span> is calling...
-        <button class="btn btn-green" onclick="acceptCall()">Accept</button>
-        <button class="btn btn-red" onclick="rejectCall()">Reject</button>
+        <span id="callerName">Someone</span> is calling 🎊
+        <button onclick="acceptCall()">Accept</button>
+        <button onclick="rejectCall()">Reject</button>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
