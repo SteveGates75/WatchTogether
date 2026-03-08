@@ -1,20 +1,28 @@
 // ==================== GLOBALS ====================
 const socket = io();
-let localStream;
-let pc;                // main peer connection for calls
-let screenPC;           // separate peer connection for screen share
+
 let username;
+let localStream = null;
+let pc = null;               // main peer connection for calls
+let screenPC = null;         // peer connection for screen sharing
 let remoteUserId = null;
 let callActive = false;
 let pendingOffer = null;
-let currentFacingMode = 'user';
 let screenSharerId = null;
 let screenShareActive = false;
 
-// Media controls
+// UI elements
+const localVideo = document.getElementById('localVideo');
+const remoteVideo = document.getElementById('remoteVideo');
+const localPlaceholder = document.getElementById('localPlaceholder');
+const remotePlaceholder = document.getElementById('remotePlaceholder');
+const muteAudioBtn = document.getElementById('muteAudioBtn');
+const muteVideoBtn = document.getElementById('muteVideoBtn');
+const switchCameraBtn = document.getElementById('switchCameraBtn');
+
 let audioEnabled = true;
 let videoEnabled = true;
-let hasMedia = false;   // whether we have obtained local media
+let currentFacingMode = 'user';
 
 // 1080p 60fps constraints
 const videoConstraints = {
@@ -23,7 +31,6 @@ const videoConstraints = {
     frameRate: { ideal: 60, max: 60 }
 };
 
-// STUN servers
 const iceConfig = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -31,15 +38,6 @@ const iceConfig = {
         { urls: 'stun:stun2.l.google.com:19302' }
     ]
 };
-
-// DOM elements
-const localVideo = document.getElementById('localVideo');
-const remoteVideo = document.getElementById('remoteVideo');
-const localPlaceholder = document.getElementById('localVideoPlaceholder');
-const remotePlaceholder = document.getElementById('remoteVideoPlaceholder');
-const muteAudioBtn = document.getElementById('muteAudioBtn');
-const muteVideoBtn = document.getElementById('muteVideoBtn');
-const switchCameraBtn = document.getElementById('switchCameraBtn');
 
 // ==================== LOGIN ====================
 function login() {
@@ -56,28 +54,24 @@ function updateStatus(msg) {
     document.getElementById('status').textContent = msg;
 }
 
-// ==================== REQUEST MEDIA (when needed) ====================
-async function getLocalMedia(withVideo = true) {
-    if (hasMedia) return localStream; // already have
+// ==================== MEDIA HELPERS ====================
+async function getLocalMedia(withVideo) {
+    if (localStream) return localStream;
     try {
         const constraints = {
             audio: true,
             video: withVideo ? videoConstraints : false
         };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        localStream = stream;
-        hasMedia = true;
-
-        // Show local video and enable controls
+        localStream = await navigator.mediaDevices.getUserMedia(constraints);
+        localVideo.srcObject = localStream;
         localVideo.style.display = 'block';
         localPlaceholder.style.display = 'none';
-        localVideo.srcObject = stream;
         muteAudioBtn.disabled = false;
         if (withVideo) {
             muteVideoBtn.disabled = false;
             switchCameraBtn.disabled = false;
         }
-        return stream;
+        return localStream;
     } catch (err) {
         console.error('Media error:', err);
         alert('Could not access camera/microphone');
@@ -85,33 +79,40 @@ async function getLocalMedia(withVideo = true) {
     }
 }
 
-// ==================== CREATE PEER CONNECTION ====================
+function stopLocalMedia() {
+    if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+        localStream = null;
+    }
+    localVideo.style.display = 'none';
+    localPlaceholder.style.display = 'flex';
+    muteAudioBtn.disabled = true;
+    muteVideoBtn.disabled = true;
+    switchCameraBtn.disabled = true;
+}
+
+// ==================== PEER CONNECTION ====================
 function createPeerConnection(targetId, isScreen = false) {
     const pc = new RTCPeerConnection(iceConfig);
 
-    // Add local tracks if we have a stream and it's not screen share
+    // Add tracks if we have a stream (for non-screen connections)
     if (!isScreen && localStream) {
         localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     }
 
+    // Handle incoming tracks
     pc.ontrack = (event) => {
-        console.log('✅ Received remote track', event.track.kind);
-        if (isScreen) {
-            // Screen share: show in remote video element
-            remoteVideo.style.display = 'block';
-            remotePlaceholder.style.display = 'none';
-            remoteVideo.srcObject = event.streams[0];
-            updateStatus('Viewing screen');
-        } else {
-            // Regular call
-            remoteVideo.style.display = 'block';
-            remotePlaceholder.style.display = 'none';
-            remoteVideo.srcObject = event.streams[0];
-            updateStatus('Connected');
-            callActive = true;
-        }
+        console.log('Received track:', event.track.kind);
+        // For screen share, we want to show it in remote video element
+        // For call, also show in remote video
+        remoteVideo.srcObject = event.streams[0];
+        remoteVideo.style.display = 'block';
+        remotePlaceholder.style.display = 'none';
+        updateStatus(isScreen ? 'Viewing screen' : 'Connected');
+        if (!isScreen) callActive = true;
     };
 
+    // ICE candidates
     pc.onicecandidate = (event) => {
         if (event.candidate) {
             const eventName = isScreen ? 'screen-ice-candidate' : 'ice-candidate';
@@ -122,8 +123,8 @@ function createPeerConnection(targetId, isScreen = false) {
         }
     };
 
+    // Connection state
     pc.oniceconnectionstatechange = () => {
-        console.log('ICE state:', pc.iceConnectionState);
         const indicator = document.getElementById('quality-indicator');
         if (pc.iceConnectionState === 'connected') {
             indicator.className = 'quality-badge quality-good';
@@ -146,7 +147,7 @@ function createPeerConnection(targetId, isScreen = false) {
 }
 
 // ==================== CALL USER ====================
-async function callUser(targetId, targetName, withVideo = true) {
+async function callUser(targetId, targetName, withVideo) {
     if (callActive) {
         alert('Already in a call');
         return;
@@ -163,11 +164,7 @@ async function callUser(targetId, targetName, withVideo = true) {
     pc.createOffer()
         .then(offer => pc.setLocalDescription(offer))
         .then(() => {
-            console.log('📤 Sending offer to', remoteUserId);
-            socket.emit('offer', {
-                offer: pc.localDescription,
-                targetId: remoteUserId
-            });
+            socket.emit('offer', { offer: pc.localDescription, targetId: remoteUserId });
             updateStatus(`Calling ${targetName}...`);
         })
         .catch(err => console.error('Offer error:', err));
@@ -178,10 +175,10 @@ async function acceptCall() {
     if (!pendingOffer) return;
     document.getElementById('incoming-call').style.display = 'none';
 
-    // Determine if this is a video call by checking offer's video presence (simplified)
-    const hasVideo = pendingOffer.offer.sdp.includes('m=video');
+    // Determine if video call by checking SDP for video line
+    const isVideo = pendingOffer.offer.sdp.includes('m=video');
     try {
-        await getLocalMedia(hasVideo);
+        await getLocalMedia(isVideo);
     } catch {
         return;
     }
@@ -193,11 +190,7 @@ async function acceptCall() {
         .then(() => pc.createAnswer())
         .then(answer => pc.setLocalDescription(answer))
         .then(() => {
-            console.log('📤 Sending answer to', remoteUserId);
-            socket.emit('answer', {
-                answer: pc.localDescription,
-                targetId: remoteUserId
-            });
+            socket.emit('answer', { answer: pc.localDescription, targetId: remoteUserId });
             updateStatus('Connecting...');
         })
         .catch(err => console.error('Accept error:', err));
@@ -212,40 +205,30 @@ function rejectCall() {
     pendingOffer = null;
 }
 
-// ==================== VIDEO / AUDIO CALL TOGGLES ====================
-function toggleVideoCall() {
-    if (callActive) {
-        hangUp();
-        return;
+// ==================== HANG UP ====================
+function hangUp() {
+    if (pc) {
+        pc.close();
+        pc = null;
     }
-    alert('Click on a user in the sidebar to start a video call.');
-}
-
-function toggleAudioCall() {
-    if (callActive) {
-        hangUp();
-        return;
+    // Stop screen share if active
+    if (screenShareActive) {
+        stopScreenShare();
     }
-    alert('Click on a user in the sidebar to start an audio call.');
+    stopLocalMedia();
+    remoteVideo.srcObject = null;
+    remoteVideo.style.display = 'none';
+    remotePlaceholder.style.display = 'flex';
+    callActive = false;
+    remoteUserId = null;
+    updateStatus('Call ended');
+    document.getElementById('quality-indicator').className = 'quality-badge';
 }
 
 // ==================== SCREEN SHARE ====================
 async function toggleScreenShare() {
     if (screenShareActive) {
-        // Stop sharing
-        if (screenPC) screenPC.close();
-        screenPC = null;
-        if (window.screenStream) {
-            window.screenStream.getTracks().forEach(t => t.stop());
-        }
-        screenShareActive = false;
-        document.getElementById('screenShareBtn').classList.remove('active');
-        socket.emit('screen-stopped');
-        // Restore remote video if there was a call
-        if (callActive && remoteUserId) {
-            // remote video should still show call video, but it might be overwritten; we can reattach if needed
-            // For simplicity, just leave as is.
-        }
+        stopScreenShare();
         return;
     }
 
@@ -254,7 +237,6 @@ async function toggleScreenShare() {
             video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: 60 },
             audio: true
         });
-        window.screenStream = screenStream;
 
         document.getElementById('screenShareBtn').classList.add('active');
         screenPC = createPeerConnection('broadcast', true);
@@ -269,9 +251,28 @@ async function toggleScreenShare() {
         screenShareActive = true;
         screenSharerId = socket.id;
 
-        screenStream.getVideoTracks()[0].onended = () => toggleScreenShare();
+        screenStream.getVideoTracks()[0].onended = () => stopScreenShare();
     } catch (err) {
         console.error('Screen share error:', err);
+    }
+}
+
+function stopScreenShare() {
+    if (screenPC) {
+        screenPC.close();
+        screenPC = null;
+    }
+    if (window.screenStream) {
+        window.screenStream.getTracks().forEach(t => t.stop());
+    }
+    screenShareActive = false;
+    document.getElementById('screenShareBtn').classList.remove('active');
+    socket.emit('screen-stopped');
+    // If not in a call, clear remote video
+    if (!callActive) {
+        remoteVideo.srcObject = null;
+        remoteVideo.style.display = 'none';
+        remotePlaceholder.style.display = 'flex';
     }
 }
 
@@ -282,9 +283,9 @@ function joinScreenShare(sharerId) {
 
     screenPC = new RTCPeerConnection(iceConfig);
     screenPC.ontrack = (event) => {
+        remoteVideo.srcObject = event.streams[0];
         remoteVideo.style.display = 'block';
         remotePlaceholder.style.display = 'none';
-        remoteVideo.srcObject = event.streams[0];
         updateStatus('Viewing screen');
     };
 
@@ -309,7 +310,7 @@ function joinScreenShare(sharerId) {
 function toggleMuteAudio() {
     if (!localStream) return;
     audioEnabled = !audioEnabled;
-    localStream.getAudioTracks().forEach(track => track.enabled = audioEnabled);
+    localStream.getAudioTracks().forEach(t => t.enabled = audioEnabled);
     muteAudioBtn.textContent = audioEnabled ? '🔊 Mute Mic' : '🔇 Unmute Mic';
     document.getElementById('localMuteIndicator').style.display = audioEnabled ? 'none' : 'block';
 }
@@ -317,11 +318,10 @@ function toggleMuteAudio() {
 function toggleMuteVideo() {
     if (!localStream) return;
     videoEnabled = !videoEnabled;
-    localStream.getVideoTracks().forEach(track => track.enabled = videoEnabled);
+    localStream.getVideoTracks().forEach(t => t.enabled = videoEnabled);
     muteVideoBtn.textContent = videoEnabled ? '🎥 Hide Video' : '🎥 Show Video';
 }
 
-// ==================== SWITCH CAMERA ====================
 async function switchCamera() {
     if (!localStream) return;
     const tracks = localStream.getVideoTracks();
@@ -346,59 +346,6 @@ async function switchCamera() {
     }
 }
 
-// ==================== COPY INVITE LINK ====================
-function copyInviteLink() {
-    const url = window.location.href;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(url).then(() => alert('Link copied!'));
-    } else {
-        prompt('Copy this link:', url);
-    }
-}
-
-// ==================== FULLSCREEN ====================
-function toggleFullscreen() {
-    if (!remoteVideo) return;
-    if (remoteVideo.requestFullscreen) remoteVideo.requestFullscreen();
-    else if (remoteVideo.webkitRequestFullscreen) remoteVideo.webkitRequestFullscreen();
-    else if (remoteVideo.msRequestFullscreen) remoteVideo.msRequestFullscreen();
-}
-
-// ==================== HANG UP ====================
-function hangUp() {
-    if (pc) {
-        pc.close();
-        pc = null;
-    }
-    // Stop screen share if active
-    if (screenShareActive) {
-        toggleScreenShare(); // this will clean up
-    }
-    // Stop local stream if we want to release camera/mic (optional)
-    if (localStream) {
-        localStream.getTracks().forEach(t => t.stop());
-        localStream = null;
-        hasMedia = false;
-    }
-    // Hide videos, show placeholders
-    localVideo.style.display = 'none';
-    remoteVideo.style.display = 'none';
-    localPlaceholder.style.display = 'flex';
-    remotePlaceholder.style.display = 'flex';
-    localVideo.srcObject = null;
-    remoteVideo.srcObject = null;
-
-    // Disable media controls
-    muteAudioBtn.disabled = true;
-    muteVideoBtn.disabled = true;
-    switchCameraBtn.disabled = true;
-
-    callActive = false;
-    remoteUserId = null;
-    updateStatus('Call ended');
-    document.getElementById('quality-indicator').className = 'quality-badge';
-}
-
 // ==================== CHAT ====================
 function sendChatMessage() {
     const input = document.getElementById('chat-input');
@@ -417,6 +364,23 @@ function addChatMessage(user, message, time) {
     chatDiv.scrollTop = chatDiv.scrollHeight;
 }
 
+// ==================== FULLSCREEN ====================
+function toggleFullscreen() {
+    if (remoteVideo.requestFullscreen) remoteVideo.requestFullscreen();
+    else if (remoteVideo.webkitRequestFullscreen) remoteVideo.webkitRequestFullscreen();
+    else if (remoteVideo.msRequestFullscreen) remoteVideo.msRequestFullscreen();
+}
+
+// ==================== COPY LINK ====================
+function copyInviteLink() {
+    const url = window.location.href;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(() => alert('Link copied!'));
+    } else {
+        prompt('Copy this link:', url);
+    }
+}
+
 // ==================== SOCKET EVENTS ====================
 
 socket.on('user-list', (users) => {
@@ -428,8 +392,8 @@ socket.on('user-list', (users) => {
             div.className = 'user-item';
             div.textContent = user.name;
             div.onclick = () => {
-                const callType = confirm(`Call ${user.name} with video? OK = Video, Cancel = Audio`);
-                callUser(user.id, user.name, callType);
+                const withVideo = confirm(`Call ${user.name} with video? OK = Video, Cancel = Audio`);
+                callUser(user.id, user.name, withVideo);
             };
             listDiv.appendChild(div);
         }
@@ -442,8 +406,8 @@ socket.on('user-joined', (data) => {
     div.className = 'user-item';
     div.textContent = data.username;
     div.onclick = () => {
-        const callType = confirm(`Call ${data.username} with video? OK = Video, Cancel = Audio`);
-        callUser(data.id, data.username, callType);
+        const withVideo = confirm(`Call ${data.username} with video? OK = Video, Cancel = Audio`);
+        callUser(data.id, data.username, withVideo);
     };
     listDiv.appendChild(div);
 });
@@ -460,8 +424,7 @@ socket.on('user-left', (data) => {
 });
 
 socket.on('offer', (data) => {
-    if (data.from === socket.id) return;
-    if (callActive) return;
+    if (data.from === socket.id || callActive) return;
     pendingOffer = data;
     const callerItem = Array.from(document.getElementById('users-list').children).find(
         item => item.onclick && item.onclick.toString().includes(data.from)
@@ -493,7 +456,7 @@ socket.on('call-rejected', (data) => {
     }
 });
 
-// Screen share signaling
+// Screen share
 socket.on('screen-offer', async (data) => {
     if (data.from === socket.id) return;
     if (screenShareActive && screenPC) {
@@ -503,7 +466,7 @@ socket.on('screen-offer', async (data) => {
         await screenPC.setLocalDescription(answer);
         socket.emit('screen-answer', { answer, to: data.from });
     } else if (screenPC) {
-        // We are a viewer answering the sharer (from joinScreenShare)
+        // We are a viewer answering the sharer
         await screenPC.setRemoteDescription(new RTCSessionDescription(data.offer));
         const answer = await screenPC.createAnswer();
         await screenPC.setLocalDescription(answer);
@@ -534,23 +497,41 @@ socket.on('screen-available', (data) => {
 
 socket.on('screen-unavailable', () => {
     screenSharerId = null;
-    if (screenPC) screenPC.close();
-    screenPC = null;
-    // Only clear remote video if it was showing screen and not a call
+    if (screenPC) {
+        screenPC.close();
+        screenPC = null;
+    }
     if (!callActive) {
+        remoteVideo.srcObject = null;
         remoteVideo.style.display = 'none';
         remotePlaceholder.style.display = 'flex';
-        remoteVideo.srcObject = null;
     }
     updateStatus('Screen share ended');
 });
 
-// Chat messages
+// Chat
 socket.on('chat-message', (data) => {
     addChatMessage(data.user, data.message, data.time);
 });
 
-// Enter key for chat
+// Enter key
 document.getElementById('chat-input').addEventListener('keypress', (e) => {
     if (e.key === 'Enter') sendChatMessage();
 });
+
+// ==================== VIDEO/AUDIO BUTTONS (just wrappers) ====================
+function toggleVideoCall() {
+    if (callActive) {
+        hangUp();
+        return;
+    }
+    alert('Click on a user in the sidebar to start a video call.');
+}
+
+function toggleAudioCall() {
+    if (callActive) {
+        hangUp();
+        return;
+    }
+    alert('Click on a user in the sidebar to start an audio call.');
+}

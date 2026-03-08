@@ -31,7 +31,7 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('user-joined', { id: socket.id, username });
   });
 
-  // WebRTC signaling
+  // WebRTC signaling (for calls)
   socket.on('offer', (data) => {
     console.log(`📤 Offer from ${socket.id} to ${data.targetId}`);
     io.to(data.targetId).emit('offer', {
