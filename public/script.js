@@ -2,21 +2,25 @@
 const socket = io();
 let localStream;
 let pc;
+let screenPC;
 let username;
 let remoteUserId = null;
 let callActive = false;
 let pendingOffer = null;
-let currentFacingMode = 'user'; // 'user' = front, 'environment' = back
+let currentFacingMode = 'user';
+let screenSharerId = null;
+let screenShareActive = false;
 
 // Media controls
 let audioEnabled = true;
 let videoEnabled = true;
 
-// Adaptive video quality based on device (mobile now gets 720p)
-const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.innerWidth < 768;
-const videoConstraints = isMobile
-    ? { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: 30 }
-    : { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: 30 };
+// 1080p 60fps constraints
+const videoConstraints = {
+    width: { ideal: 1920, max: 1920 },
+    height: { ideal: 1080, max: 1080 },
+    frameRate: { ideal: 60, max: 60 }
+};
 
 // STUN servers
 const iceConfig = {
@@ -32,22 +36,27 @@ function login() {
     username = document.getElementById('username').value.trim();
     if (!username) return alert('Enter name');
     socket.emit('join', username);
-    document.getElementById('login').style.display = 'none';
-    document.getElementById('app').style.display = 'flex';
+    document.getElementById('login-container').style.display = 'none';
+    document.getElementById('app-container').style.display = 'flex';
     updateStatus('Joining...');
 
-    // Get local media with adaptive quality
     navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: true })
         .then(stream => {
             localStream = stream;
             document.getElementById('localVideo').srcObject = stream;
             updateStatus('Logged in, ready to call');
-            startConfetti();
-            setTimeout(stopConfetti, 3000);
         })
         .catch(err => {
-            console.error('Media error:', err);
-            alert('Cannot access camera/microphone');
+            console.error('Media error, falling back to audio only', err);
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    localStream = stream;
+                    updateStatus('Mic only');
+                })
+                .catch(err2 => {
+                    console.error('No media devices', err2);
+                    updateStatus('No media');
+                });
         });
 }
 
@@ -57,35 +66,37 @@ function updateStatus(msg) {
 }
 
 // ==================== CREATE PEER CONNECTION ====================
-function createPeerConnection(targetId) {
+function createPeerConnection(targetId, isScreen = false) {
     const pc = new RTCPeerConnection(iceConfig);
 
-    // Add local tracks
-    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    if (!isScreen && localStream) {
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    }
 
-    // Handle incoming tracks
     pc.ontrack = (event) => {
-        console.log('✅ Received remote track');
-        const remoteVideo = document.getElementById('remoteVideo');
-        remoteVideo.srcObject = event.streams[0];
-        updateStatus('Connected');
-        callActive = true;
-        startConfetti();
-        setTimeout(stopConfetti, 3000);
+        console.log('✅ Received remote track', event.track.kind);
+        if (isScreen) {
+            const remoteVideo = document.getElementById('remoteVideo');
+            remoteVideo.srcObject = event.streams[0];
+            updateStatus('Screen shared');
+        } else {
+            const remoteVideo = document.getElementById('remoteVideo');
+            remoteVideo.srcObject = event.streams[0];
+            updateStatus('Connected');
+            callActive = true;
+        }
     };
 
-    // ICE candidate
     pc.onicecandidate = (event) => {
         if (event.candidate) {
-            console.log('❄️ Sending ICE candidate to', targetId);
-            socket.emit('ice-candidate', {
+            const eventName = isScreen ? 'screen-ice-candidate' : 'ice-candidate';
+            socket.emit(eventName, {
                 candidate: event.candidate,
                 targetId: targetId
             });
         }
     };
 
-    // Connection state changes
     pc.oniceconnectionstatechange = () => {
         console.log('ICE state:', pc.iceConnectionState);
         const indicator = document.getElementById('quality-indicator');
@@ -98,17 +109,19 @@ function createPeerConnection(targetId) {
         }
 
         if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
-            updateStatus('Disconnected');
-            callActive = false;
-            remoteUserId = null;
+            if (!isScreen) {
+                updateStatus('Disconnected');
+                callActive = false;
+                remoteUserId = null;
+            }
         }
     };
 
     return pc;
 }
 
-// ==================== START CALL ====================
-function callUser(targetId, targetName) {
+// ==================== CALL USER ====================
+function callUser(targetId, targetName, withVideo = true) {
     if (callActive) {
         alert('Already in a call');
         return;
@@ -116,7 +129,7 @@ function callUser(targetId, targetName) {
     if (!localStream) return alert('No media');
 
     remoteUserId = targetId;
-    pc = createPeerConnection(remoteUserId);
+    pc = createPeerConnection(remoteUserId, false);
 
     pc.createOffer()
         .then(offer => pc.setLocalDescription(offer))
@@ -137,7 +150,7 @@ function acceptCall() {
     document.getElementById('incoming-call').style.display = 'none';
 
     remoteUserId = pendingOffer.from;
-    pc = createPeerConnection(remoteUserId);
+    pc = createPeerConnection(remoteUserId, false);
 
     pc.setRemoteDescription(new RTCSessionDescription(pendingOffer.offer))
         .then(() => pc.createAnswer())
@@ -162,17 +175,92 @@ function rejectCall() {
     pendingOffer = null;
 }
 
-// ==================== HANG UP ====================
-function hangUp() {
-    if (pc) {
-        pc.close();
-        pc = null;
+// ==================== VIDEO / AUDIO CALL TOGGLES ====================
+function toggleVideoCall() {
+    if (!localStream) return alert('No camera/mic');
+    if (callActive) {
+        hangUp();
+        return;
     }
-    document.getElementById('remoteVideo').srcObject = null;
-    callActive = false;
-    remoteUserId = null;
-    updateStatus('Call ended');
-    document.getElementById('quality-indicator').className = 'quality-badge';
+    alert('Click on a user in the sidebar to start a video call.');
+}
+
+function toggleAudioCall() {
+    if (!localStream) return alert('No microphone');
+    if (callActive) {
+        hangUp();
+        return;
+    }
+    alert('Click on a user in the sidebar to start an audio call.');
+}
+
+// ==================== SCREEN SHARE ====================
+async function toggleScreenShare() {
+    if (screenShareActive) {
+        if (screenPC) screenPC.close();
+        screenPC = null;
+        if (window.screenStream) {
+            window.screenStream.getTracks().forEach(t => t.stop());
+        }
+        screenShareActive = false;
+        document.getElementById('screenShareBtn').classList.remove('active');
+        socket.emit('screen-stopped');
+        return;
+    }
+
+    try {
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({
+            video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: 60 },
+            audio: true
+        });
+        window.screenStream = screenStream;
+
+        document.getElementById('screenShareBtn').classList.add('active');
+        screenPC = createPeerConnection('broadcast', true);
+        screenStream.getTracks().forEach(track => screenPC.addTrack(track, screenStream));
+
+        const offer = await screenPC.createOffer();
+        await screenPC.setLocalDescription(offer);
+
+        socket.emit('screen-offer', { offer, to: 'all' });
+        socket.emit('screen-started');
+
+        screenShareActive = true;
+        screenSharerId = socket.id;
+
+        screenStream.getVideoTracks()[0].onended = () => toggleScreenShare();
+    } catch (err) {
+        console.error('Screen share error:', err);
+    }
+}
+
+// ==================== JOIN SCREEN SHARE ====================
+function joinScreenShare(sharerId) {
+    if (!sharerId || sharerId === socket.id) return;
+    if (screenPC) screenPC.close();
+
+    screenPC = new RTCPeerConnection(iceConfig);
+    screenPC.ontrack = (event) => {
+        const remoteVideo = document.getElementById('remoteVideo');
+        remoteVideo.srcObject = event.streams[0];
+        updateStatus('Viewing screen');
+    };
+
+    screenPC.onicecandidate = (event) => {
+        if (event.candidate) {
+            socket.emit('screen-ice-candidate', {
+                candidate: event.candidate,
+                targetId: sharerId
+            });
+        }
+    };
+
+    screenPC.createOffer({ offerToReceiveVideo: true, offerToReceiveAudio: true })
+        .then(offer => screenPC.setLocalDescription(offer))
+        .then(() => {
+            socket.emit('screen-offer', { offer: screenPC.localDescription, to: sharerId });
+        })
+        .catch(err => console.error('Join screen error:', err));
 }
 
 // ==================== MUTE CONTROLS ====================
@@ -205,20 +293,16 @@ async function switchCamera() {
     };
     try {
         const newStream = await navigator.mediaDevices.getUserMedia(constraints);
-        // Replace local video
         document.getElementById('localVideo').srcObject = newStream;
-        // Update peer connection if in a call
         if (pc) {
             const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
             if (sender) sender.replaceTrack(newStream.getVideoTracks()[0]);
         }
-        // Stop old tracks
         localStream.getTracks().forEach(t => t.stop());
         localStream = newStream;
         currentFacingMode = newFacingMode;
     } catch (err) {
         console.error('Camera switch failed:', err);
-        alert('Could not switch camera');
     }
 }
 
@@ -226,13 +310,9 @@ async function switchCamera() {
 function copyInviteLink() {
     const url = window.location.href;
     if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(url).then(() => {
-            alert('Link copied to clipboard!');
-        }).catch(() => {
-            prompt('Copy this link manually:', url);
-        });
+        navigator.clipboard.writeText(url).then(() => alert('Link copied!'));
     } else {
-        prompt('Copy this link manually:', url);
+        prompt('Copy this link:', url);
     }
 }
 
@@ -240,139 +320,89 @@ function copyInviteLink() {
 function toggleFullscreen() {
     const remoteVideo = document.getElementById('remoteVideo');
     if (!remoteVideo) return;
-    if (remoteVideo.requestFullscreen) {
-        remoteVideo.requestFullscreen();
-    } else if (remoteVideo.webkitRequestFullscreen) {
-        remoteVideo.webkitRequestFullscreen();
-    } else if (remoteVideo.msRequestFullscreen) {
-        remoteVideo.msRequestFullscreen();
+    if (remoteVideo.requestFullscreen) remoteVideo.requestFullscreen();
+    else if (remoteVideo.webkitRequestFullscreen) remoteVideo.webkitRequestFullscreen();
+    else if (remoteVideo.msRequestFullscreen) remoteVideo.msRequestFullscreen();
+}
+
+// ==================== HANG UP ====================
+function hangUp() {
+    if (pc) {
+        pc.close();
+        pc = null;
     }
+    document.getElementById('remoteVideo').srcObject = null;
+    callActive = false;
+    remoteUserId = null;
+    updateStatus('Call ended');
+    document.getElementById('quality-indicator').className = 'quality-badge';
 }
 
-// ==================== CONFETTI ====================
-let confettiCanvas = document.getElementById('confetti-canvas');
-let ctx = confettiCanvas.getContext('2d');
-let width, height;
-let particles = [];
-let animationId = null;
-
-function resizeCanvas() {
-    width = window.innerWidth;
-    height = window.innerHeight;
-    confettiCanvas.width = width;
-    confettiCanvas.height = height;
+// ==================== CHAT ====================
+function sendChatMessage() {
+    const input = document.getElementById('chat-input');
+    const msg = input.value.trim();
+    if (!msg) return;
+    socket.emit('chat-message', { message: msg });
+    input.value = '';
 }
 
-window.addEventListener('resize', resizeCanvas);
-resizeCanvas();
-
-function randomRange(min, max) {
-    return Math.random() * (max - min) + min;
-}
-
-function createParticle() {
-    return {
-        x: Math.random() * width,
-        y: Math.random() * height - height,
-        size: randomRange(5, 15),
-        speedY: randomRange(2, 8),
-        speedX: randomRange(-2, 2),
-        color: `hsl(${randomRange(0, 360)}, 100%, 60%)`,
-        rotation: randomRange(0, 360),
-        rotationSpeed: randomRange(-2, 2)
-    };
-}
-
-function updateConfetti() {
-    ctx.clearRect(0, 0, width, height);
-    for (let i = particles.length - 1; i >= 0; i--) {
-        const p = particles[i];
-        p.y += p.speedY;
-        p.x += p.speedX;
-        p.rotation += p.rotationSpeed;
-        if (p.y > height + 50) {
-            particles.splice(i, 1);
-            continue;
-        }
-        ctx.save();
-        ctx.translate(p.x, p.y);
-        ctx.rotate((p.rotation * Math.PI) / 180);
-        ctx.fillStyle = p.color;
-        ctx.fillRect(-p.size/2, -p.size/2, p.size, p.size);
-        ctx.restore();
-    }
-    if (particles.length > 0) {
-        animationId = requestAnimationFrame(updateConfetti);
-    } else {
-        animationId = null;
-    }
-}
-
-function startConfetti() {
-    if (animationId) cancelAnimationFrame(animationId);
-    particles = [];
-    for (let i = 0; i < 150; i++) {
-        particles.push(createParticle());
-    }
-    animationId = requestAnimationFrame(updateConfetti);
-}
-
-function stopConfetti() {
-    // Let particles fade out naturally
+function addChatMessage(user, message, time) {
+    const chatDiv = document.getElementById('messages');
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message';
+    msgDiv.innerHTML = `<strong>${user}</strong> ${message} <small>${time}</small>`;
+    chatDiv.appendChild(msgDiv);
+    chatDiv.scrollTop = chatDiv.scrollHeight;
 }
 
 // ==================== SOCKET EVENTS ====================
 
 socket.on('user-list', (users) => {
-    console.log('Online users:', users);
-    const listDiv = document.getElementById('user-list');
+    const listDiv = document.getElementById('users-list');
     listDiv.innerHTML = '';
     users.forEach(user => {
         if (user.id !== socket.id) {
             const div = document.createElement('div');
             div.className = 'user-item';
             div.textContent = user.name;
-            div.onclick = () => callUser(user.id, user.name);
+            div.onclick = () => {
+                const callType = confirm(`Call ${user.name} with video? OK = Video, Cancel = Audio`);
+                callUser(user.id, user.name, callType);
+            };
             listDiv.appendChild(div);
         }
     });
 });
 
 socket.on('user-joined', (data) => {
-    console.log(`${data.username} joined`);
-    const listDiv = document.getElementById('user-list');
+    const listDiv = document.getElementById('users-list');
     const div = document.createElement('div');
     div.className = 'user-item';
     div.textContent = data.username;
-    div.onclick = () => callUser(data.id, data.username);
+    div.onclick = () => {
+        const callType = confirm(`Call ${data.username} with video? OK = Video, Cancel = Audio`);
+        callUser(data.id, data.username, callType);
+    };
     listDiv.appendChild(div);
-    startConfetti();
-    setTimeout(stopConfetti, 2000);
 });
 
 socket.on('user-left', (data) => {
-    console.log(`${data.username} left`);
-    const items = document.getElementById('user-list').children;
+    const items = document.getElementById('users-list').children;
     for (let item of items) {
         if (item.textContent === data.username) {
             item.remove();
             break;
         }
     }
-    if (data.id === remoteUserId) {
-        hangUp();
-    }
+    if (data.id === remoteUserId) hangUp();
 });
 
 socket.on('offer', (data) => {
-    console.log('📲 Received offer from', data.from);
-    if (callActive) {
-        console.log('Already in a call, ignoring');
-        return;
-    }
+    if (data.from === socket.id) return;
+    if (callActive) return;
     pendingOffer = data;
-    // Find caller's name
-    const callerItem = Array.from(document.getElementById('user-list').children).find(
+    const callerItem = Array.from(document.getElementById('users-list').children).find(
         item => item.onclick && item.onclick.toString().includes(data.from)
     );
     const callerName = callerItem ? callerItem.textContent : 'Someone';
@@ -381,13 +411,11 @@ socket.on('offer', (data) => {
 });
 
 socket.on('answer', async (data) => {
-    console.log('📲 Received answer from', data.from);
     if (!pc) return;
     await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
 });
 
 socket.on('ice-candidate', async (data) => {
-    console.log('❄️ Received ICE candidate from', data.from);
     if (!pc) return;
     try {
         await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
@@ -400,6 +428,61 @@ socket.on('call-rejected', (data) => {
     if (data.from === remoteUserId) {
         hangUp();
         updateStatus('Call rejected');
-        alert('The other party rejected your call.');
+        alert('Call was rejected.');
     }
+});
+
+// Screen share signaling
+socket.on('screen-offer', async (data) => {
+    if (data.from === socket.id) return;
+    if (screenShareActive && screenPC) {
+        await screenPC.setRemoteDescription(new RTCSessionDescription(data.offer));
+        const answer = await screenPC.createAnswer();
+        await screenPC.setLocalDescription(answer);
+        socket.emit('screen-answer', { answer, to: data.from });
+    } else if (screenPC) {
+        await screenPC.setRemoteDescription(new RTCSessionDescription(data.offer));
+        const answer = await screenPC.createAnswer();
+        await screenPC.setLocalDescription(answer);
+        socket.emit('screen-answer', { answer, to: data.from });
+    }
+});
+
+socket.on('screen-answer', async (data) => {
+    if (!screenPC) return;
+    await screenPC.setRemoteDescription(new RTCSessionDescription(data.answer));
+});
+
+socket.on('screen-ice-candidate', async (data) => {
+    if (!screenPC) return;
+    try {
+        await screenPC.addIceCandidate(new RTCIceCandidate(data.candidate));
+    } catch (err) {
+        console.error('Error adding screen ICE candidate:', err);
+    }
+});
+
+socket.on('screen-available', (data) => {
+    screenSharerId = data.sharer;
+    if (confirm(`${data.username} started screen sharing. Join?`)) {
+        joinScreenShare(data.sharer);
+    }
+});
+
+socket.on('screen-unavailable', () => {
+    screenSharerId = null;
+    if (screenPC) screenPC.close();
+    screenPC = null;
+    document.getElementById('remoteVideo').srcObject = null;
+    updateStatus('Screen share ended');
+});
+
+// Chat messages
+socket.on('chat-message', (data) => {
+    addChatMessage(data.user, data.message, data.time);
+});
+
+// Enter key for chat
+document.getElementById('chat-input').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') sendChatMessage();
 });

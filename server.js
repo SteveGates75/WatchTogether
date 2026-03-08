@@ -62,6 +62,52 @@ io.on('connection', (socket) => {
     io.to(data.targetId).emit('call-rejected', { from: socket.id });
   });
 
+  // Text chat
+  socket.on('chat-message', (data) => {
+    const username = users.get(socket.id);
+    if (username) {
+      io.emit('chat-message', {
+        user: username,
+        message: data.message,
+        time: new Date().toLocaleTimeString()
+      });
+    }
+  });
+
+  // Screen sharing signaling
+  socket.on('screen-offer', (data) => {
+    socket.broadcast.emit('screen-offer', {
+      offer: data.offer,
+      from: socket.id
+    });
+  });
+
+  socket.on('screen-answer', (data) => {
+    io.to(data.to).emit('screen-answer', {
+      answer: data.answer,
+      from: socket.id
+    });
+  });
+
+  socket.on('screen-ice-candidate', (data) => {
+    io.to(data.to).emit('screen-ice-candidate', {
+      candidate: data.candidate,
+      from: socket.id
+    });
+  });
+
+  socket.on('screen-started', () => {
+    const username = users.get(socket.id);
+    socket.broadcast.emit('screen-available', {
+      sharer: socket.id,
+      username: username
+    });
+  });
+
+  socket.on('screen-stopped', () => {
+    socket.broadcast.emit('screen-unavailable');
+  });
+
   socket.on('disconnect', () => {
     const username = users.get(socket.id);
     if (username) {
@@ -69,6 +115,7 @@ io.on('connection', (socket) => {
       users.delete(socket.id);
       io.emit('user-left', { id: socket.id, username });
     }
+    socket.broadcast.emit('screen-unavailable');
   });
 });
 
