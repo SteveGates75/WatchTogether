@@ -168,10 +168,15 @@ body {
     gap: 8px;
 }
 
-.call-controls button:hover {
+.call-controls button:hover:not(:disabled) {
     background: rgba(255,255,255,0.2);
     transform: translateY(-2px);
     box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+}
+
+.call-controls button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 .btn-primary {
@@ -218,6 +223,20 @@ body {
     border: 1px solid rgba(255,255,255,0.1);
     aspect-ratio: 16/9;
     backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.video-box.placeholder {
+    background: rgba(255,255,255,0.05);
+}
+
+.placeholder-content {
+    text-align: center;
+    color: rgba(255,255,255,0.5);
+    font-size: 14px;
+    padding: 20px;
 }
 
 .video-box video {
@@ -240,6 +259,7 @@ body {
     backdrop-filter: blur(4px);
     border: 1px solid rgba(255,255,255,0.2);
     margin: 0;
+    z-index: 2;
 }
 
 .mute-indicator {

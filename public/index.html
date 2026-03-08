@@ -9,9 +9,9 @@
 </head>
 <body>
     <div id="login-container">
-        <h2>✨ Connect</h2>
+        <h2>✨ Welcome</h2>
         <input type="text" id="username" placeholder="Your name">
-        <button onclick="login()">Enter</button>
+        <button onclick="login()">Join</button>
     </div>
 
     <div id="app-container">
@@ -22,9 +22,9 @@
                 <button class="btn" id="videoCallBtn" onclick="toggleVideoCall()">📹 Video Call</button>
                 <button class="btn" id="audioCallBtn" onclick="toggleAudioCall()">🎧 Audio Call</button>
                 <button class="btn" id="screenShareBtn" onclick="toggleScreenShare()">📺 Share Screen</button>
-                <button class="btn" id="muteAudioBtn" onclick="toggleMuteAudio()">🔊 Mute Mic</button>
-                <button class="btn" id="muteVideoBtn" onclick="toggleMuteVideo()">🎥 Hide Video</button>
-                <button class="btn" id="switchCameraBtn" onclick="switchCamera()">📷 Switch</button>
+                <button class="btn" id="muteAudioBtn" onclick="toggleMuteAudio()" disabled>🔊 Mute Mic</button>
+                <button class="btn" id="muteVideoBtn" onclick="toggleMuteVideo()" disabled>🎥 Hide Video</button>
+                <button class="btn" id="switchCameraBtn" onclick="switchCamera()" disabled>📷 Switch</button>
                 <button class="btn-primary" onclick="copyInviteLink()">🔗 Copy Link</button>
                 <button class="btn-danger" onclick="hangUp()">📴 Hang Up</button>
             </div>
@@ -32,20 +32,22 @@
 
         <div class="main-content">
             <div class="video-grid" id="video-grid">
-                <div class="video-box">
-                    <video id="localVideo" autoplay playsinline muted></video>
+                <div class="video-box placeholder" id="localVideoPlaceholder">
+                    <div class="placeholder-content">Your video will appear here when you start a call</div>
+                    <video id="localVideo" autoplay playsinline muted style="display: none;"></video>
                     <p>You</p>
                     <span class="mute-indicator" id="localMuteIndicator">🔇 Muted</span>
                 </div>
-                <div class="video-box">
-                    <video id="remoteVideo" autoplay playsinline></video>
+                <div class="video-box placeholder" id="remoteVideoPlaceholder">
+                    <div class="placeholder-content">Remote video will appear here</div>
+                    <video id="remoteVideo" autoplay playsinline style="display: none;"></video>
                     <p>Remote</p>
-                    <button class="fullscreen-btn" onclick="toggleFullscreen()">⛶ Full</button>
+                    <button class="fullscreen-btn" onclick="toggleFullscreen()" style="display: none;">⛶ Full</button>
                 </div>
             </div>
 
             <div id="status-bar">
-                <span id="status">Not connected</span>
+                <span id="status">Not in a call</span>
                 <span id="quality-indicator" class="quality-badge"></span>
             </div>
 

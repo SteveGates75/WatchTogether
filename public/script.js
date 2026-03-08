@@ -1,8 +1,8 @@
 // ==================== GLOBALS ====================
 const socket = io();
 let localStream;
-let pc;
-let screenPC;
+let pc;                // main peer connection for calls
+let screenPC;           // separate peer connection for screen share
 let username;
 let remoteUserId = null;
 let callActive = false;
@@ -14,6 +14,7 @@ let screenShareActive = false;
 // Media controls
 let audioEnabled = true;
 let videoEnabled = true;
+let hasMedia = false;   // whether we have obtained local media
 
 // 1080p 60fps constraints
 const videoConstraints = {
@@ -31,6 +32,15 @@ const iceConfig = {
     ]
 };
 
+// DOM elements
+const localVideo = document.getElementById('localVideo');
+const remoteVideo = document.getElementById('remoteVideo');
+const localPlaceholder = document.getElementById('localVideoPlaceholder');
+const remotePlaceholder = document.getElementById('remoteVideoPlaceholder');
+const muteAudioBtn = document.getElementById('muteAudioBtn');
+const muteVideoBtn = document.getElementById('muteVideoBtn');
+const switchCameraBtn = document.getElementById('switchCameraBtn');
+
 // ==================== LOGIN ====================
 function login() {
     username = document.getElementById('username').value.trim();
@@ -38,26 +48,7 @@ function login() {
     socket.emit('join', username);
     document.getElementById('login-container').style.display = 'none';
     document.getElementById('app-container').style.display = 'flex';
-    updateStatus('Joining...');
-
-    navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: true })
-        .then(stream => {
-            localStream = stream;
-            document.getElementById('localVideo').srcObject = stream;
-            updateStatus('Logged in, ready to call');
-        })
-        .catch(err => {
-            console.error('Media error, falling back to audio only', err);
-            navigator.mediaDevices.getUserMedia({ audio: true })
-                .then(stream => {
-                    localStream = stream;
-                    updateStatus('Mic only');
-                })
-                .catch(err2 => {
-                    console.error('No media devices', err2);
-                    updateStatus('No media');
-                });
-        });
+    updateStatus('Logged in. Click on a user to call.');
 }
 
 // ==================== UPDATE STATUS ====================
@@ -65,10 +56,40 @@ function updateStatus(msg) {
     document.getElementById('status').textContent = msg;
 }
 
+// ==================== REQUEST MEDIA (when needed) ====================
+async function getLocalMedia(withVideo = true) {
+    if (hasMedia) return localStream; // already have
+    try {
+        const constraints = {
+            audio: true,
+            video: withVideo ? videoConstraints : false
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        localStream = stream;
+        hasMedia = true;
+
+        // Show local video and enable controls
+        localVideo.style.display = 'block';
+        localPlaceholder.style.display = 'none';
+        localVideo.srcObject = stream;
+        muteAudioBtn.disabled = false;
+        if (withVideo) {
+            muteVideoBtn.disabled = false;
+            switchCameraBtn.disabled = false;
+        }
+        return stream;
+    } catch (err) {
+        console.error('Media error:', err);
+        alert('Could not access camera/microphone');
+        throw err;
+    }
+}
+
 // ==================== CREATE PEER CONNECTION ====================
 function createPeerConnection(targetId, isScreen = false) {
     const pc = new RTCPeerConnection(iceConfig);
 
+    // Add local tracks if we have a stream and it's not screen share
     if (!isScreen && localStream) {
         localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     }
@@ -76,11 +97,15 @@ function createPeerConnection(targetId, isScreen = false) {
     pc.ontrack = (event) => {
         console.log('✅ Received remote track', event.track.kind);
         if (isScreen) {
-            const remoteVideo = document.getElementById('remoteVideo');
+            // Screen share: show in remote video element
+            remoteVideo.style.display = 'block';
+            remotePlaceholder.style.display = 'none';
             remoteVideo.srcObject = event.streams[0];
-            updateStatus('Screen shared');
+            updateStatus('Viewing screen');
         } else {
-            const remoteVideo = document.getElementById('remoteVideo');
+            // Regular call
+            remoteVideo.style.display = 'block';
+            remotePlaceholder.style.display = 'none';
             remoteVideo.srcObject = event.streams[0];
             updateStatus('Connected');
             callActive = true;
@@ -121,12 +146,16 @@ function createPeerConnection(targetId, isScreen = false) {
 }
 
 // ==================== CALL USER ====================
-function callUser(targetId, targetName, withVideo = true) {
+async function callUser(targetId, targetName, withVideo = true) {
     if (callActive) {
         alert('Already in a call');
         return;
     }
-    if (!localStream) return alert('No media');
+    try {
+        await getLocalMedia(withVideo);
+    } catch {
+        return;
+    }
 
     remoteUserId = targetId;
     pc = createPeerConnection(remoteUserId, false);
@@ -145,9 +174,17 @@ function callUser(targetId, targetName, withVideo = true) {
 }
 
 // ==================== ACCEPT CALL ====================
-function acceptCall() {
+async function acceptCall() {
     if (!pendingOffer) return;
     document.getElementById('incoming-call').style.display = 'none';
+
+    // Determine if this is a video call by checking offer's video presence (simplified)
+    const hasVideo = pendingOffer.offer.sdp.includes('m=video');
+    try {
+        await getLocalMedia(hasVideo);
+    } catch {
+        return;
+    }
 
     remoteUserId = pendingOffer.from;
     pc = createPeerConnection(remoteUserId, false);
@@ -177,7 +214,6 @@ function rejectCall() {
 
 // ==================== VIDEO / AUDIO CALL TOGGLES ====================
 function toggleVideoCall() {
-    if (!localStream) return alert('No camera/mic');
     if (callActive) {
         hangUp();
         return;
@@ -186,7 +222,6 @@ function toggleVideoCall() {
 }
 
 function toggleAudioCall() {
-    if (!localStream) return alert('No microphone');
     if (callActive) {
         hangUp();
         return;
@@ -197,6 +232,7 @@ function toggleAudioCall() {
 // ==================== SCREEN SHARE ====================
 async function toggleScreenShare() {
     if (screenShareActive) {
+        // Stop sharing
         if (screenPC) screenPC.close();
         screenPC = null;
         if (window.screenStream) {
@@ -205,6 +241,11 @@ async function toggleScreenShare() {
         screenShareActive = false;
         document.getElementById('screenShareBtn').classList.remove('active');
         socket.emit('screen-stopped');
+        // Restore remote video if there was a call
+        if (callActive && remoteUserId) {
+            // remote video should still show call video, but it might be overwritten; we can reattach if needed
+            // For simplicity, just leave as is.
+        }
         return;
     }
 
@@ -241,7 +282,8 @@ function joinScreenShare(sharerId) {
 
     screenPC = new RTCPeerConnection(iceConfig);
     screenPC.ontrack = (event) => {
-        const remoteVideo = document.getElementById('remoteVideo');
+        remoteVideo.style.display = 'block';
+        remotePlaceholder.style.display = 'none';
         remoteVideo.srcObject = event.streams[0];
         updateStatus('Viewing screen');
     };
@@ -268,8 +310,7 @@ function toggleMuteAudio() {
     if (!localStream) return;
     audioEnabled = !audioEnabled;
     localStream.getAudioTracks().forEach(track => track.enabled = audioEnabled);
-    const btn = document.getElementById('muteAudioBtn');
-    btn.textContent = audioEnabled ? '🔊 Mute Mic' : '🔇 Unmute Mic';
+    muteAudioBtn.textContent = audioEnabled ? '🔊 Mute Mic' : '🔇 Unmute Mic';
     document.getElementById('localMuteIndicator').style.display = audioEnabled ? 'none' : 'block';
 }
 
@@ -277,8 +318,7 @@ function toggleMuteVideo() {
     if (!localStream) return;
     videoEnabled = !videoEnabled;
     localStream.getVideoTracks().forEach(track => track.enabled = videoEnabled);
-    const btn = document.getElementById('muteVideoBtn');
-    btn.textContent = videoEnabled ? '🎥 Hide Video' : '🎥 Show Video';
+    muteVideoBtn.textContent = videoEnabled ? '🎥 Hide Video' : '🎥 Show Video';
 }
 
 // ==================== SWITCH CAMERA ====================
@@ -293,7 +333,7 @@ async function switchCamera() {
     };
     try {
         const newStream = await navigator.mediaDevices.getUserMedia(constraints);
-        document.getElementById('localVideo').srcObject = newStream;
+        localVideo.srcObject = newStream;
         if (pc) {
             const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
             if (sender) sender.replaceTrack(newStream.getVideoTracks()[0]);
@@ -318,7 +358,6 @@ function copyInviteLink() {
 
 // ==================== FULLSCREEN ====================
 function toggleFullscreen() {
-    const remoteVideo = document.getElementById('remoteVideo');
     if (!remoteVideo) return;
     if (remoteVideo.requestFullscreen) remoteVideo.requestFullscreen();
     else if (remoteVideo.webkitRequestFullscreen) remoteVideo.webkitRequestFullscreen();
@@ -331,7 +370,29 @@ function hangUp() {
         pc.close();
         pc = null;
     }
-    document.getElementById('remoteVideo').srcObject = null;
+    // Stop screen share if active
+    if (screenShareActive) {
+        toggleScreenShare(); // this will clean up
+    }
+    // Stop local stream if we want to release camera/mic (optional)
+    if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+        localStream = null;
+        hasMedia = false;
+    }
+    // Hide videos, show placeholders
+    localVideo.style.display = 'none';
+    remoteVideo.style.display = 'none';
+    localPlaceholder.style.display = 'flex';
+    remotePlaceholder.style.display = 'flex';
+    localVideo.srcObject = null;
+    remoteVideo.srcObject = null;
+
+    // Disable media controls
+    muteAudioBtn.disabled = true;
+    muteVideoBtn.disabled = true;
+    switchCameraBtn.disabled = true;
+
     callActive = false;
     remoteUserId = null;
     updateStatus('Call ended');
@@ -436,11 +497,13 @@ socket.on('call-rejected', (data) => {
 socket.on('screen-offer', async (data) => {
     if (data.from === socket.id) return;
     if (screenShareActive && screenPC) {
+        // We are the sharer, answer this viewer
         await screenPC.setRemoteDescription(new RTCSessionDescription(data.offer));
         const answer = await screenPC.createAnswer();
         await screenPC.setLocalDescription(answer);
         socket.emit('screen-answer', { answer, to: data.from });
     } else if (screenPC) {
+        // We are a viewer answering the sharer (from joinScreenShare)
         await screenPC.setRemoteDescription(new RTCSessionDescription(data.offer));
         const answer = await screenPC.createAnswer();
         await screenPC.setLocalDescription(answer);
@@ -473,7 +536,12 @@ socket.on('screen-unavailable', () => {
     screenSharerId = null;
     if (screenPC) screenPC.close();
     screenPC = null;
-    document.getElementById('remoteVideo').srcObject = null;
+    // Only clear remote video if it was showing screen and not a call
+    if (!callActive) {
+        remoteVideo.style.display = 'none';
+        remotePlaceholder.style.display = 'flex';
+        remoteVideo.srcObject = null;
+    }
     updateStatus('Screen share ended');
 });
 
