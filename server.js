@@ -19,21 +19,19 @@ app.use(express.static(path.join(__dirname, 'public')));
 const users = new Map(); // socketId -> username
 
 io.on('connection', (socket) => {
-  console.log('✅ User connected:', socket.id);
+  console.log('User connected:', socket.id);
 
   socket.on('join', (username) => {
     users.set(socket.id, username);
-    console.log(`${username} joined`);
-    // Send the list of existing users to the new user
+    // Send existing users to the new user
     const userList = Array.from(users.entries()).map(([id, name]) => ({ id, name }));
     socket.emit('user-list', userList);
-    // Notify others that a new user joined
+    // Notify others
     socket.broadcast.emit('user-joined', { id: socket.id, username });
   });
 
-  // WebRTC signaling for audio/video calls
+  // WebRTC signaling for calls
   socket.on('offer', (data) => {
-    console.log(`📤 Offer from ${socket.id} to ${data.targetId}`);
     io.to(data.targetId).emit('offer', {
       offer: data.offer,
       from: socket.id
@@ -41,7 +39,6 @@ io.on('connection', (socket) => {
   });
 
   socket.on('answer', (data) => {
-    console.log(`📤 Answer from ${socket.id} to ${data.targetId}`);
     io.to(data.targetId).emit('answer', {
       answer: data.answer,
       from: socket.id
@@ -49,7 +46,6 @@ io.on('connection', (socket) => {
   });
 
   socket.on('ice-candidate', (data) => {
-    console.log(`❄️ ICE candidate from ${socket.id} to ${data.targetId}`);
     io.to(data.targetId).emit('ice-candidate', {
       candidate: data.candidate,
       from: socket.id
@@ -58,11 +54,10 @@ io.on('connection', (socket) => {
 
   // Call rejection
   socket.on('call-rejected', (data) => {
-    console.log(`📞 Call rejected from ${socket.id} to ${data.targetId}`);
     io.to(data.targetId).emit('call-rejected', { from: socket.id });
   });
 
-  // Text chat
+  // Chat
   socket.on('chat-message', (data) => {
     const username = users.get(socket.id);
     if (username) {
@@ -74,7 +69,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Screen sharing signaling (separate)
+  // Screen share signaling
   socket.on('screen-offer', (data) => {
     socket.broadcast.emit('screen-offer', {
       offer: data.offer,
@@ -111,15 +106,12 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const username = users.get(socket.id);
     if (username) {
-      console.log(`${username} disconnected`);
-      users.delete(socket.id);
       io.emit('user-left', { id: socket.id, username });
+      users.delete(socket.id);
     }
     socket.broadcast.emit('screen-unavailable');
   });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
