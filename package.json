@@ -1,5 +1,5 @@
 {
-  "name": "video-call-app",
+  "name": "modern-video-call",
   "version": "1.0.0",
   "description": "1080p 60fps Video Call & Screen Share with Chat",
   "main": "server.js",

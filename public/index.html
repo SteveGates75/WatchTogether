@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Video Call & Screen Share</title>
+    <title>1080p 60fps Video Call & Chat</title>
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 </head>
 <body>
     <div id="login-container">
-        <h2>✨ Connect</h2>
+        <h2>✨ Welcome</h2>
         <input type="text" id="username" placeholder="Your name">
         <button onclick="login()">Join</button>
     </div>
@@ -31,14 +31,14 @@
         </div>
 
         <div class="main-content">
-            <div class="video-grid">
-                <div class="video-box placeholder" id="localPlaceholder">
-                    <div class="placeholder-content">Your video will appear when you start a call</div>
+            <div class="video-grid" id="video-grid">
+                <div class="video-box placeholder" id="localVideoPlaceholder">
+                    <div class="placeholder-content">Your video will appear here when you start a call</div>
                     <video id="localVideo" autoplay playsinline muted style="display: none;"></video>
                     <p>You</p>
                     <span class="mute-indicator" id="localMuteIndicator">🔇 Muted</span>
                 </div>
-                <div class="video-box placeholder" id="remotePlaceholder">
+                <div class="video-box placeholder" id="remoteVideoPlaceholder">
                     <div class="placeholder-content">Remote video will appear here</div>
                     <video id="remoteVideo" autoplay playsinline style="display: none;"></video>
                     <p>Remote</p>
