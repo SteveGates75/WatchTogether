@@ -3,56 +3,89 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Video Call & Screen Share</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Simple Video Call</title>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family: sans-serif; background: #1a1a2e; color:white; }
+        #login-container { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:#16213e; padding:2rem; border-radius:10px; width:90%; max-width:350px; }
+        #login-container input, #login-container button { width:100%; padding:10px; margin:5px 0; border:none; border-radius:5px; }
+        #login-container button { background:#4CAF50; color:white; cursor:pointer; }
+        #app-container { display:none; height:100vh; }
+        .sidebar { width:250px; background:#0f3460; padding:1rem; position:fixed; height:100%; overflow-y:auto; }
+        .sidebar h3 { margin-bottom:1rem; }
+        .user-item { padding:0.5rem; margin:0.25rem 0; background:#1a1a2e; border-radius:5px; cursor:pointer; }
+        .user-item:hover { background:#16213e; }
+        .controls { margin-top:2rem; }
+        .controls button { display:block; width:100%; padding:0.5rem; margin:0.5rem 0; background:#4CAF50; border:none; border-radius:5px; color:white; cursor:pointer; }
+        .controls button.danger { background:#f44336; }
+        .main-content { margin-left:250px; padding:1rem; display:flex; flex-direction:column; height:100%; }
+        .video-grid { display:flex; gap:1rem; flex:1; }
+        .video-box { flex:1; background:#0f3460; border-radius:10px; overflow:hidden; position:relative; min-height:200px; }
+        video { width:100%; height:100%; object-fit:cover; background:black; }
+        .placeholder { display:flex; align-items:center; justify-content:center; height:100%; color:#aaa; }
+        .status-bar { display:flex; justify-content:space-between; margin:1rem 0; }
+        .chat-container { background:#0f3460; border-radius:10px; padding:1rem; height:200px; display:flex; flex-direction:column; }
+        #messages { flex:1; overflow-y:auto; margin-bottom:0.5rem; }
+        .message { margin-bottom:0.25rem; font-size:14px; }
+        .message strong { color:#4CAF50; }
+        .message small { color:#aaa; font-size:11px; margin-left:0.5rem; }
+        .message-input { display:flex; gap:0.5rem; }
+        .message-input input { flex:1; padding:0.5rem; border-radius:5px; border:none; }
+        .message-input button { padding:0.5rem 1rem; background:#4CAF50; border:none; border-radius:5px; color:white; cursor:pointer; }
+        #incoming-call { position:fixed; top:20px; left:50%; transform:translateX(-50%); background:#333; padding:1rem 2rem; border-radius:50px; display:none; z-index:1000; }
+        #incoming-call button { margin:0 0.5rem; padding:0.25rem 1rem; border:none; border-radius:20px; cursor:pointer; }
+        #incoming-call button.accept { background:#4CAF50; color:white; }
+        #incoming-call button.reject { background:#f44336; color:white; }
+        @media (max-width:768px) {
+            .sidebar { width:200px; }
+            .main-content { margin-left:200px; }
+        }
+        @media (max-width:600px) {
+            .sidebar { width:100%; height:auto; position:relative; }
+            .main-content { margin-left:0; }
+            .video-grid { flex-direction:column; }
+        }
+    </style>
 </head>
 <body>
     <div id="login-container">
-        <h2>✨ Welcome</h2>
+        <h2>Join</h2>
         <input type="text" id="username" placeholder="Your name">
-        <button onclick="login()">Join</button>
+        <button onclick="login()">Enter</button>
     </div>
 
-    <div id="app-container" style="display: none;">
+    <div id="app-container">
         <div class="sidebar">
-            <h3>⚡ Online</h3>
+            <h3>Online</h3>
             <div id="users-list"></div>
-            <div class="call-controls">
-                <button class="btn" id="videoCallBtn" onclick="toggleVideoCall()">📹 Video Call</button>
-                <button class="btn" id="audioCallBtn" onclick="toggleAudioCall()">🎧 Audio Call</button>
-                <button class="btn" id="screenShareBtn" onclick="toggleScreenShare()">📺 Share Screen</button>
-                <button class="btn" id="muteAudioBtn" onclick="toggleMuteAudio()" disabled>🔊 Mute Mic</button>
-                <button class="btn" id="muteVideoBtn" onclick="toggleMuteVideo()" disabled>🎥 Hide Video</button>
-                <button class="btn" id="switchCameraBtn" onclick="switchCamera()" disabled>📷 Switch</button>
-                <button class="btn-primary" onclick="copyInviteLink()">🔗 Copy Link</button>
-                <button class="btn-danger" onclick="hangUp()">📴 Hang Up</button>
+            <div class="controls">
+                <button onclick="toggleScreenShare()">📺 Share Screen</button>
+                <button class="danger" onclick="hangUp()">📴 Hang Up</button>
             </div>
         </div>
 
         <div class="main-content">
             <div class="video-grid">
-                <div class="video-box placeholder" id="localPlaceholder">
-                    <div class="placeholder-content">You</div>
-                    <video id="localVideo" autoplay playsinline muted style="display: none;"></video>
-                    <span class="mute-indicator" id="localMuteIndicator">🔇 Muted</span>
+                <div class="video-box">
+                    <video id="localVideo" autoplay playsinline muted style="display:none;"></video>
+                    <div id="localPlaceholder" class="placeholder">You</div>
                 </div>
-                <div class="video-box placeholder" id="remotePlaceholder">
-                    <div class="placeholder-content">Remote</div>
-                    <video id="remoteVideo" autoplay playsinline style="display: none;"></video>
-                    <button class="fullscreen-btn" onclick="toggleFullscreen()" style="display: none;">⛶ Full</button>
+                <div class="video-box">
+                    <video id="remoteVideo" autoplay playsinline style="display:none;"></video>
+                    <div id="remotePlaceholder" class="placeholder">Remote</div>
                 </div>
             </div>
 
-            <div id="status-bar">
+            <div class="status-bar">
                 <span id="status">Not in a call</span>
-                <span id="quality-indicator" class="quality-badge"></span>
+                <span id="quality-indicator"></span>
             </div>
 
             <div class="chat-container">
                 <div id="messages"></div>
                 <div class="message-input">
                     <input type="text" id="chat-input" placeholder="Type a message...">
-                    <button onclick="sendChatMessage()">Send</button>
+                    <button onclick="sendMessage()">Send</button>
                 </div>
             </div>
         </div>
@@ -60,8 +93,8 @@
 
     <div id="incoming-call">
         <span id="callerName">Someone</span> is calling
-        <button onclick="acceptCall()">Accept</button>
-        <button onclick="rejectCall()">Reject</button>
+        <button class="accept" onclick="acceptCall()">Accept</button>
+        <button class="reject" onclick="rejectCall()">Reject</button>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
